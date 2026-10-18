@@ -600,7 +600,7 @@ Not yet.
 
 ## Changelog
 ### 2.1.1
-- Added themes. Choose default (brown), Dark ski-fi (black-neon), nature (green) pr ocean (blue).
+- Added themes. Choose default (brown), Dark ski-fi (black-neon), nature (green) or ocean (blue).
 
 ### 2.1.0
 - Added remaining missing API endpoints so external clients can fully manage story sessions, including memory and graph.
