@@ -116,21 +116,12 @@ button.compact-button:hover {
 }
 
 button.compact-button.danger-button {
-  border: 1px solid var(--danger-border);
-  color: var(--danger-text);
+  border: 1px solid var(--reset-border);
+  color: var(--reset-text);
 }
 
 button.compact-button.danger-button:hover {
-  background: var(--danger-background);
-}
-
-.memory-actions button.compact-button.danger-button {
-  border-color: var(--memory-reset-border);
-  color: var(--memory-reset-text);
-}
-
-.memory-actions button.compact-button.danger-button:hover {
-  background: var(--memory-reset-hover);
+  background: var(--reset-hover);
 }
 
 .start-page {

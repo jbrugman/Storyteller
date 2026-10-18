@@ -44,7 +44,7 @@
   --modal-background: #211916;
   --modal-shadow-color: rgb(0 0 0 / 55%);
   color-scheme: dark;
-  --memory-reset-border: var(--danger-border);
-  --memory-reset-text: var(--danger-text);
-  --memory-reset-hover: var(--danger-background);
+  --reset-border: var(--danger-border);
+  --reset-text: var(--danger-text);
+  --reset-hover: var(--danger-background);
 }

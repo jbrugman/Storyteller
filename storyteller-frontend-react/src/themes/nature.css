@@ -25,7 +25,7 @@
   --image-focus: #9bd4a5;
   --preview-text: #bad0c1;
   --hint: #9db6a5;
-  --memory-reset-border: var(--action-border);
-  --memory-reset-text: var(--accent);
-  --memory-reset-hover: var(--action-hover);
+  --reset-border: var(--action-border);
+  --reset-text: var(--accent);
+  --reset-hover: var(--action-hover);
 }
