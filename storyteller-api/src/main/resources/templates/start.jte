@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Storyteller</title>
+    <script src="/story-theme.js"></script>
     <link rel="stylesheet" href="/storyteller.css">
   </head>
   <body>

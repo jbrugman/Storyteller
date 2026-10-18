@@ -6,8 +6,11 @@ import StoryPage from './StoryPage';
 import SettingsPage from './SettingsPage';
 import HistoryPage from './HistoryPage';
 import type { EditableSettings } from './SettingsPage';
+import { applyTheme, readTheme, saveTheme } from './theme';
+import type { Theme } from './theme';
 
 export default function App() {
+  const [theme, setTheme] = useState<Theme>(readTheme);
   const [session, setSession] = useState<Session | null>(null);
   const [messages, setMessages] = useState<StoryMessage[]>([]);
   const [config, setConfig] = useState<SessionConfig | null>(null);
@@ -138,7 +141,8 @@ export default function App() {
       prompt={prompt} onPromptChange={setPrompt} onSend={() => { void sendPrompt(); }}
       onSettings={() => { void openSettings(); }} onStop={() => { void stopStory(); }}
       onInfinite={() => { void toggleInfinite(); }} onHistory={() => { void openHistory(); }} />}
-    {page === 'settings' && config && <SettingsPage config={config} busy={busy}
+    {page === 'settings' && config && <SettingsPage config={config} busy={busy} theme={theme}
+      onThemeChange={theme => { setTheme(theme); applyTheme(theme); saveTheme(theme); }}
       onSave={settings => { void saveSettings(settings); }} onBack={() => setPage('story')} />}
     {page === 'history' && state && <HistoryPage state={state} busy={busy}
       onReset={layer => { void resetMemory(layer); }} onBack={() => setPage('story')} />}

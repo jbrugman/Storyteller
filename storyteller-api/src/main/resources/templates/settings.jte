@@ -8,6 +8,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Story settings</title>
+    <script src="/story-theme.js"></script>
     <link rel="stylesheet" href="/storyteller.css">
   </head>
   <body>
@@ -19,6 +20,17 @@
         </div>
         <a class="header-action" href="/story">Back to story</a>
       </header>
+
+      <section class="panel theme-settings" aria-label="Appearance">
+        <label for="theme">Theme</label>
+        <select id="theme">
+          <option value="default">Default</option>
+          <option value="dark-sci-fi">Dark sci-fi</option>
+          <option value="nature">Nature</option>
+          <option value="ocean">Ocean</option>
+        </select>
+        <p class="setting-hint">Applies immediately and is remembered in this browser for one year when cookies are enabled.</p>
+      </section>
 
       <form method="post" action="/story/settings" class="panel settings-form">
         <p class="intro">

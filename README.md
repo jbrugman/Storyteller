@@ -145,6 +145,11 @@ By default, the server listens on:
 Open either address in a browser to use the bundled web interface. HTTPS uses a locally generated certificate authority;
 clients must trust that local CA to avoid certificate warnings.
 
+In Story settings, the Theme menu offers Default, Dark sci-fi, Nature, and Ocean. Changes apply immediately;
+the separate `storyteller_theme` cookie remembers the choice for one year, including after stopping a story.
+The bundled UI keeps layout and component rules in `public/storyteller.css`, which imports the color palettes from
+`public/themes/default.css`, `public/themes/dark-sci-fi.css`, `public/themes/nature.css`, and `public/themes/ocean.css`.
+
 Alternative clients can use the API for session lifetime/deletion/resume, story turns with images and historical
 context, message editing, history, configuration, undo, state inspection, graph management, memory resets, and ZIP
 import/export. See the [implemented API contracts](docs/api_design.md#implemented-json-api).

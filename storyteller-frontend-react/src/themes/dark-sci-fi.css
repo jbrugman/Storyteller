@@ -1,0 +1,31 @@
+:root[data-theme="dark-sci-fi"] {
+  --background: #08090b;
+  --text: #f4f5e8;
+  --glow: rgba(255, 159, 28, 0.12);
+  --action-border: #676626;
+  --accent: #edff38;
+  --action-hover: #282a12;
+  --muted: #a1a38d;
+  --border: #303226;
+  --panel: rgba(18, 20, 23, 0.92);
+  --text-secondary: #c0c2b4;
+  --text-subtle: #858875;
+  --input-border: #464936;
+  --input-background: #0c0e11;
+  --input-text: #f7f8ee;
+  --focus-ring: rgba(237, 255, 56, 0.18);
+  --button-text: #101206;
+  --accent-hover: #f5ff83;
+  --button-disabled: #72763b;
+  --session-id: #b0b39c;
+  --conversation: rgba(12, 14, 17, 0.92);
+  --heading: #16191e;
+  --prompt: #211b12;
+  --reference-muted: #a9a28d;
+  --image-focus: #ff9f1c;
+  --preview-text: #c9cbb7;
+  --hint: #aeb09c;
+  --memory-reset-border: var(--action-border);
+  --memory-reset-text: var(--accent);
+  --memory-reset-hover: var(--action-hover);
+}
