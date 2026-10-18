@@ -599,6 +599,9 @@ Not yet.
 ```
 
 ## Changelog
+### 2.1.1
+- Added themes. Choose default (brown), Dark ski-fi (black-neon), nature (green) or ocean (blue).
+
 ### 2.1.0
 - Added remaining missing API endpoints so external clients can fully manage story sessions, including memory and graph.
 - Added a small react-based front-end web interface example to demonstrate the API endpoints and provide a simple web-based story interface.
@@ -673,52 +676,4 @@ backend.http.url=https://generativelanguage.googleapis.com/v1beta/openai/chat/co
 backend.http.apiKey=Your_Google_Developer_Api_Key
 model.chat=gemini-3.6-flash
 ```
-
-### 2.0.3
-- BUGFIX: Rewind the long-term, mid-term, and canonical-state processing cursors when undoing a web/API story turn, so
-  its replacement is processed by the shared background-memory model.
-- BUGFIX: Remove turn-based knowledge-graph facts belonging to an undone turn and rewind the graph checkpoint, so a
-  replacement turn is included in the next graph update.
-
-### 2.0.2
-- Corrected the memory model configuration key from `memory.chat` to `memory.http.model`.
-
-### 2.0.1
-- Added optional `memory.chat`, `memory.http.url`, and `memory.http.apikey` settings for the shared background-memory
-  client used by long-term history, recent history, canonical state, and knowledge-graph generation. Empty settings
-  fall back to `model.chat`, `backend.http.url`, and `backend.http.apiKey`.
-- Restricted `graph.generation.transport` to the shared memory client. Main story generation and validation always use
-  the OpenAI-compatible backend client, allowing the validator to retain reasoning independently of memory transport.
-- BUGFIX: Prevent infinite sessions and their dependent data from being deleted, including through the Stop story action.
-
-### 2.0.0
-- Replaced the CLI's file-backed runtime state with the shared H2 session store. This is a breaking storage change: the CLI no longer uses the former `memory/` files as its live persistence format; existing files are imported once when applicable.
-- Moved H2, the SQL schema, repository contracts, JDBC implementations, and session bundle records into the reusable `storyteller-db` module.
-- Migrated CLI history, summaries, canonical state, turn state, and knowledge graph to the shared H2 session store, with a one-time import of existing file-backed CLI state.
-- Added resuming an infinite web session by its displayed session ID from another browser.
-- Removed the ineffective cache-buster requests and their configuration and benchmark options.
-- Added one-turn references to up to three older story exchanges from the web interface.
-- Added CLI selection of an existing shared H2 session with `--session <session-id>`; without it, the fixed CLI
-  session remains the default.
-- Added built-in HTTPS support to the API and web interface, with automatically generated and renewed certificates signed by a reusable local certificate authority.
-- Improved removal of leaked model reasoning, including multiline content and alternative thinking/channel tag formats.
-- Added web editing for the system prompt, fixed protagonists, rules, and validated knowledge graph, including
-  fixed-protagonist YAML validation and portable ZIP import and export.
-- Added H2-backed background refresh of mid-term history, long-term history, and canonical state, plus a read-only web
-  History page for inspecting the generated summaries and canonical state.
-- Added web image support for vision models, with paste and file selection, session thumbnails, H2 persistence, and portable ZIP import and export.
-- Added automatic per-session turn-based knowledge-graph updates to API and web story turns.
-- Disabled reasoning through LM Studio's native API for validation and derived-state generation; normal story turns
-  retain the model's configured reasoning behavior.
-
-### 1.3.6
-- Added incremental web story loading: the newest five exchanges are rendered initially and older exchanges load in five-exchange pages when scrolling upward.
-- Added centralized server-side normalization and validation for web and JSON API text input.
-- Added shared crash-safe file writing for persistent CLI state and exports using flushed temporary files and atomic replacement.
-
-### 1.3.5
-- Added an optional infinite-session mode that keeps a story out of inactivity cleanup until the normal timeout is restored.
-- Added an Undo control that atomically removes the latest prompt and response from the active web story.
-- Added `/export -zip` to the CLI and transactional session ZIP import/export to the web application for transferring history and derived memory between them.
-
 Read more: https://github.com/jbrugman/Assistant/wiki/Changelog

@@ -1,15 +1,18 @@
 import { useState } from 'react';
 import type { SessionConfig } from './api';
+import type { Theme } from './theme';
 
 export type EditableSettings = Pick<SessionConfig, 'systemPrompt' | 'fixedProtagonists' | 'rules' | 'temperature'>;
 interface Props {
   config: SessionConfig;
   busy: boolean;
+  theme: Theme;
+  onThemeChange: (theme: Theme) => void;
   onSave: (settings: EditableSettings) => void;
   onBack: () => void;
 }
 
-export default function SettingsPage({ config, busy, onSave, onBack }: Props) {
+export default function SettingsPage({ config, busy, theme, onThemeChange, onSave, onBack }: Props) {
   const [systemPrompt, setSystemPrompt] = useState(config.systemPrompt);
   const [fixedProtagonists, setFixedProtagonists] = useState(config.fixedProtagonists);
   const [rules, setRules] = useState(config.rules);
@@ -20,6 +23,16 @@ export default function SettingsPage({ config, busy, onSave, onBack }: Props) {
       <div><p className="eyebrow">Storyteller</p><h1>Story settings</h1></div>
       <button className="header-action secondary-action" onClick={onBack} disabled={busy}>Back to story</button>
     </header>
+    <section className="panel settings-form theme-settings" aria-label="Appearance">
+      <label htmlFor="theme">Theme</label>
+      <select id="theme" value={theme} onChange={event => onThemeChange(event.target.value as Theme)}>
+        <option value="default">Default</option>
+        <option value="dark-sci-fi">Dark sci-fi</option>
+        <option value="nature">Nature</option>
+        <option value="ocean">Ocean</option>
+      </select>
+      <p className="setting-hint">Applies immediately and is remembered in this browser for one year when cookies are enabled.</p>
+    </section>
     <form className="panel settings-form" onSubmit={event => {
       event.preventDefault();
       onSave({ systemPrompt, fixedProtagonists, rules, temperature: useDefault ? null : temperature });

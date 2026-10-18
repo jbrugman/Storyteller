@@ -35,7 +35,8 @@ Sending a prompt invokes the configured model.
 2. Send a prompt and read the persisted history.
 3. Open Settings to edit the system prompt, protagonists YAML, rules, and temperature slider (0–2). Save to apply them to the next turn.
 4. Select “Use server default” and save to restore the default temperature.
-5. Reload the page: `GET /v1/session` restores the session through its cookie.
+5. In Settings, choose Default, Dark sci-fi, Nature, or Ocean. Themes apply immediately across all screens, independently of Save settings. A separate `storyteller_theme` cookie remembers the choice for one year; stopping a story does not clear it. Missing or unknown values use Default. If cookies are blocked, the choice lasts for the current visit.
+6. Reload the page: `GET /v1/session` restores the session through its cookie.
 
 Starting, resuming, or importing a session switches the active cookie; it does not delete the previous session.
 “Infinite” preserves the session for later resume and displays its resume ID; “Use timeout” restores finite lifetime.
@@ -51,10 +52,12 @@ The proxy does not share cookies already stored for a different hostname: use `l
 | `src/App.tsx` | Active session, screen selection, API operations, and shared loading/error handling. |
 | `src/StartPage.tsx` | Create, resume, and ZIP import forms. |
 | `src/StoryPage.tsx` | Paired prompt/response history, composer, and layout toggles. |
-| `src/SettingsPage.tsx` | Prompt settings and temperature slider. |
+| `src/SettingsPage.tsx` | Theme selector, prompt settings, and temperature slider. |
+| `src/theme.ts` | Theme preference cookie and document theme attribute. |
 | `src/HistoryPage.tsx` | Read-only memory layers, cursors, and reset buttons. |
 | `src/main.tsx` | Mount the application into the HTML root element. |
-| `src/style.css` | CSS copied from the bundled Java web interface, plus small React notice/default-control additions. |
+| `src/style.css` | Layout and component rules, plus small React notice/default-control additions; imports the theme files. |
+| `src/themes/*.css` | Default color palette and the Dark sci-fi, Nature, and Ocean overrides, selected by `data-theme`. |
 | `vite.config.ts` | React build tooling and the local API proxy. |
 
 The example follows the start, story, and settings layouts of the bundled JTE web interface. It calls create/current/resume/stop session, lifetime PATCH, ZIP import, history, state/memory resets, config GET/PATCH, and turns. For request/response contracts and additional endpoints, read [the API design](../docs/api_design.md#implemented-json-api). Image controls, graph editing, undo, response editing, and export are left for extensions.

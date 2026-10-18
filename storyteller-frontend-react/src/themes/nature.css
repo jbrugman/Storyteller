@@ -1,0 +1,31 @@
+:root[data-theme="nature"] {
+  --background: #09140f;
+  --text: #e7f1e8;
+  --glow: rgba(88, 163, 106, 0.18);
+  --action-border: #486951;
+  --accent: #9bd4a5;
+  --action-hover: #203b29;
+  --muted: #91a895;
+  --border: #2b4534;
+  --panel: rgba(18, 38, 26, 0.92);
+  --text-secondary: #b3c8b8;
+  --text-subtle: #7c9884;
+  --input-border: #3c5b46;
+  --input-background: #0d2016;
+  --input-text: #edf6ef;
+  --focus-ring: rgba(155, 212, 165, 0.18);
+  --button-text: #102418;
+  --accent-hover: #b6e5be;
+  --button-disabled: #4c7055;
+  --session-id: #a1bca9;
+  --conversation: rgba(13, 29, 20, 0.92);
+  --heading: #162d20;
+  --prompt: #1c3827;
+  --reference-muted: #92ad9a;
+  --image-focus: #9bd4a5;
+  --preview-text: #bad0c1;
+  --hint: #9db6a5;
+  --reset-border: var(--action-border);
+  --reset-text: var(--accent);
+  --reset-hover: var(--action-hover);
+}
