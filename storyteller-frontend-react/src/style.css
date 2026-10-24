@@ -2,6 +2,9 @@
 @import "./themes/dark-sci-fi.css";
 @import "./themes/nature.css";
 @import "./themes/ocean.css";
+@import "./themes/passion.css";
+@import "./themes/summer.css";
+@import "./themes/evening.css";
 
 :root {
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
@@ -847,3 +850,44 @@ textarea {
 .theme-settings .setting-hint {
   margin-bottom: 0;
 }
+
+/* Read-only story atlas, shared layout in both frontends. */
+.atlas-layout {
+  display: grid;
+  grid-template-columns: minmax(13rem, 1fr) minmax(0, 2fr);
+  gap: 1rem;
+  align-items: start;
+}
+.atlas-index, .atlas-detail { min-width: 0; }
+.atlas-search, .atlas-list { display: grid; gap: 0.65rem; }
+.atlas-search label { color: var(--text-secondary); }
+.atlas-entry {
+  display: block;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--action-border);
+  border-radius: 8px;
+  color: var(--accent);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.atlas-entry:hover, .atlas-entry[aria-current="true"] { background: var(--action-hover); }
+.atlas-entry[aria-current="true"] { border-color: var(--accent); font-weight: 700; }
+.atlas-detail { overflow-wrap: anywhere; }
+.atlas-detail h2, .atlas-detail h3, .atlas-detail p { margin: 0; }
+.atlas-facts { margin: 0; padding-left: 1.25rem; }
+.atlas-facts li { padding: 0.65rem 0; }
+.atlas-facts li + li { border-top: 1px solid var(--border); }
+.atlas-connections { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 0.3rem; }
+.atlas-connections a { color: var(--accent); }
+.atlas-other summary { cursor: pointer; color: var(--text-secondary); }
+.atlas-revision { margin-top: 1rem; }
+@media (max-width: 650px) {
+  .atlas-layout { grid-template-columns: minmax(0, 1fr); }
+}
+
+.atlas-profile { margin: 0.8rem 0 0; }
+.atlas-profile > div { margin: 0.65rem 0; }
+.atlas-profile dt { color: var(--text-secondary); font-weight: 700; }
+.atlas-profile dd { margin: 0.2rem 0 0; }
+.atlas-profile-value { white-space: pre-wrap; }
+.atlas-profile .atlas-profile { margin-top: 0; padding-left: 1rem; border-left: 1px solid var(--border); }

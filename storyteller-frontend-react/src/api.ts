@@ -41,6 +41,41 @@ export interface SessionState {
   knowledgeGraph: unknown;
 }
 
+export interface AtlasRelation {
+  id: string;
+  text: string;
+  subjectId: string;
+  objectId: string;
+  status: 'ACTIVE' | 'PROPOSED' | 'RETRACTED' | 'SUPERSEDED';
+  source: string;
+  sourceTurn: number | null;
+  hard: boolean;
+}
+
+export interface AtlasEntry {
+  id: string;
+  type: 'CHARACTER' | 'LOCATION' | 'ITEM' | 'SKILL';
+  name: string;
+  aliases: string[];
+  source: string;
+  relations: AtlasRelation[];
+  profile: AtlasProfileField[];
+  profileNotice: string;
+}
+
+export interface AtlasProfileField {
+  label: string;
+  value: string;
+  children: AtlasProfileField[];
+}
+
+export interface SessionAtlas {
+  sessionId: string;
+  revision: number;
+  entries: AtlasEntry[];
+  profileWarning: string;
+}
+
 export type MemoryLayer = 'mid-term' | 'long-term' | 'canonical-state';
 
 // Relative URLs work through Vite's development proxy or a same-origin deployment.
@@ -66,6 +101,7 @@ export const api = {
   currentSession: () => request<Session>('/session'),
   stopSession: () => request<void>('/session/stop', 'POST'),
   setInfinite: (id: string, infinite: boolean) => request<Session>(sessionPath(id), 'PATCH', { infinite }),
+  atlas: (id: string) => request<SessionAtlas>(`${sessionPath(id)}/atlas`),
   state: (id: string) => request<SessionState>(`${sessionPath(id)}/state`),
   resetMemory: (id: string, layer: MemoryLayer) => request<void>(`${sessionPath(id)}/memory/reset/${layer}`, 'POST'),
   createSession: (title: string) => request<Session>('/sessions', 'POST', { title }),

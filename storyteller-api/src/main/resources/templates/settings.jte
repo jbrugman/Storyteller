@@ -25,9 +25,12 @@
         <label for="theme">Theme</label>
         <select id="theme">
           <option value="default">Default</option>
-          <option value="dark-sci-fi">Dark sci-fi</option>
+          <option value="dark-sci-fi">Ski-fi</option>
           <option value="nature">Nature</option>
           <option value="ocean">Ocean</option>
+          <option value="passion">Passion</option>
+          <option value="summer">Summer</option>
+          <option value="evening">Evening</option>
         </select>
         <p class="setting-hint">Applies immediately and is remembered in this browser for one year when cookies are enabled.</p>
       </section>

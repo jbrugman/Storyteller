@@ -29,6 +29,7 @@ import nl.llm.storyteller.api.story.StoryTurnService;
 import nl.llm.storyteller.api.story.SessionDerivedStateService;
 import nl.llm.storyteller.api.story.SessionKnowledgeGraphService;
 import nl.llm.storyteller.api.story.SessionMemoryService;
+import nl.llm.storyteller.api.story.SessionAtlasService;
 import nl.llm.storyteller.api.story.StoryService;
 import nl.llm.storyteller.api.web.WebController;
 import nl.llm.storyteller.core.config.AppConfig;
@@ -151,8 +152,11 @@ public final class ApiServer implements AutoCloseable {
       sessionService, cookieService, bundleService
     );
     SessionSettingsService settingsService = new SessionSettingsService(settingsRepository, graphValidator);
+    var atlasService = new SessionAtlasService(
+      settingsService, PredicateCatalog.load(coreConfig.baseDir())
+    );
     SessionDataController sessionDataController = new SessionDataController(
-      sessionService, storyService, storyTurnService, settingsService, memoryService, knowledgeGraphService, defaultTemperature
+      sessionService, storyService, storyTurnService, settingsService, memoryService, knowledgeGraphService, atlasService, defaultTemperature
     );
     WebController webController = new WebController(
       sessionService,
@@ -163,6 +167,7 @@ public final class ApiServer implements AutoCloseable {
       settingsService,
       memoryService,
       knowledgeGraphService,
+      atlasService,
       defaultTemperature
     );
     ApiTlsMaterial tlsMaterial = config.tls().enabled() ? ApiTlsMaterial.prepare(config.tls()) : null;

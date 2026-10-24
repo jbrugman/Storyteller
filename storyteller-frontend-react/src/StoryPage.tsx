@@ -12,9 +12,10 @@ interface Props {
   onStop: () => void;
   onInfinite: () => void;
   onHistory: () => void;
+  onAtlas: () => void;
 }
 
-export default function StoryPage({ session, messages, busy, prompt, onPromptChange, onSend, onSettings, onStop, onInfinite, onHistory }: Props) {
+export default function StoryPage({ session, messages, busy, prompt, onPromptChange, onSend, onSettings, onStop, onInfinite, onHistory, onAtlas }: Props) {
   const [single, setSingle] = useState(false);
   const [maximized, setMaximized] = useState(false);
   const conversation = useRef<HTMLElement>(null);
@@ -40,6 +41,7 @@ export default function StoryPage({ session, messages, busy, prompt, onPromptCha
         {session.infinite && <p className="resume-session-id">Resume ID: <code>{session.sessionId}</code></p>}
       </div>
       <div className="session-actions">
+        <button className="header-action secondary-action" onClick={onAtlas} disabled={busy}>Atlas</button>
         <button className="header-action secondary-action" onClick={onHistory} disabled={busy}>History</button>
         <button className="header-action secondary-action" onClick={onSettings} disabled={busy}>Settings</button>
         <button className="infinite-session" aria-pressed={session.infinite} onClick={onInfinite} disabled={busy}>

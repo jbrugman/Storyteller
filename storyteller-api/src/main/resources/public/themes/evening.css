@@ -1,0 +1,32 @@
+:root[data-theme="evening"] {
+  --background: #121524;
+  --text: #f3ece8;
+  --glow: rgba(139, 100, 169, 0.2);
+  --action-border: #8a7699;
+  --accent: #efbf83;
+  --action-hover: #373047;
+  --muted: #b6a7be;
+  --border: #49405a;
+  --panel: rgba(35, 31, 52, 0.94);
+  --text-secondary: #d1c3d5;
+  --text-subtle: #b6a3c1;
+  --input-border: #7b698c;
+  --input-background: #191827;
+  --input-text: #faf1ea;
+  --focus-ring: rgba(239, 191, 131, 0.2);
+  --button-text: #2b2030;
+  --accent-hover: #f7d5a5;
+  --button-disabled: #a28598;
+  --session-id: #c7b4ce;
+  --conversation: rgba(24, 24, 41, 0.96);
+  --heading: #2d263e;
+  --prompt: #32283e;
+  --reference-muted: #bca8c7;
+  --image-focus: #efbf83;
+  --preview-text: #d1c3d5;
+  --hint: #c0adc8;
+  --modal-background: #272137;
+  --reset-border: var(--action-border);
+  --reset-text: var(--accent);
+  --reset-hover: var(--action-hover);
+}

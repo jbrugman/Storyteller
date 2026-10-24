@@ -1,4 +1,4 @@
-export type Theme = 'default' | 'dark-sci-fi' | 'nature' | 'ocean';
+export type Theme = 'default' | 'dark-sci-fi' | 'nature' | 'ocean' | 'passion' | 'summer' | 'evening';
 
 const cookieName = 'storyteller_theme';
 
@@ -6,7 +6,8 @@ export function readTheme(): Theme {
   try {
     const value = document.cookie.split(';').map(cookie => cookie.trim())
       .find(cookie => cookie.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1);
-    return value === 'dark-sci-fi' || value === 'nature' || value === 'ocean' ? value : 'default';
+    return value === 'dark-sci-fi' || value === 'nature' || value === 'ocean'
+      || value === 'passion' || value === 'summer' || value === 'evening' ? value : 'default';
   } catch {
     // Cookie access can be blocked; the default theme still works.
     return 'default';

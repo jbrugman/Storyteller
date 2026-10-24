@@ -1,0 +1,32 @@
+:root[data-theme="passion"] {
+  --background: #200f0e;
+  --text: #faeee4;
+  --glow: rgba(104, 45, 35, 0.35);
+  --action-border: #a76555;
+  --accent: #e8a28c;
+  --action-hover: #53291f;
+  --muted: #c7a093;
+  --border: #684038;
+  --panel: rgba(104, 45, 35, 0.92);
+  --text-secondary: #efd2c3;
+  --text-subtle: #d0a99a;
+  --input-border: #b37664;
+  --input-background: #301815;
+  --input-text: #fff3e9;
+  --focus-ring: rgba(232, 162, 140, 0.25);
+  --button-text: #321712;
+  --accent-hover: #f3bda7;
+  --button-disabled: #b17b6b;
+  --session-id: #dfb7a8;
+  --conversation: rgba(45, 22, 18, 0.96);
+  --heading: #51271f;
+  --prompt: #42231d;
+  --reference-muted: #d0a99a;
+  --image-focus: #f3bda7;
+  --preview-text: #efd2c3;
+  --hint: #dfb7a8;
+  --modal-background: #401f1a;
+  --reset-border: var(--action-border);
+  --reset-text: var(--accent);
+  --reset-hover: var(--action-hover);
+}

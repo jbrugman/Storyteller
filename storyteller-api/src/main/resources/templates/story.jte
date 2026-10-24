@@ -23,6 +23,7 @@
           @endif
         </div>
         <div class="session-actions">
+          <a id="session-atlas" class="header-action" href="/story/atlas">Atlas</a>
           <a id="session-history" class="header-action session-history" href="/story/memory">History</a>
           <a id="session-settings" class="header-action session-settings" href="/story/settings">Settings</a>
           <form method="post" action="/story/infinite">
