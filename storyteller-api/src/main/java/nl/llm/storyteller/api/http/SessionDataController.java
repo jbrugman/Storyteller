@@ -15,6 +15,7 @@ import nl.llm.storyteller.api.http.dto.SessionGraphResponse;
 import nl.llm.storyteller.api.session.SessionService;
 import nl.llm.storyteller.api.session.SessionSettingsService;
 import nl.llm.storyteller.api.story.SessionMemoryService;
+import nl.llm.storyteller.api.story.SessionAtlasService;
 import nl.llm.storyteller.api.story.StoryService;
 import nl.llm.storyteller.api.story.StoryTurnService;
 import nl.llm.storyteller.api.story.SessionKnowledgeGraphService;
@@ -30,6 +31,7 @@ public final class SessionDataController {
   private final StoryTurnService storyTurnService;
   private final SessionSettingsService settingsService;
   private final SessionMemoryService memoryService;
+  private final SessionAtlasService atlasService;
   private final SessionKnowledgeGraphService graphService;
   private final Double defaultTemperature;
   private final KnowledgeGraphJsonCodec graphCodec = new KnowledgeGraphJsonCodec();
@@ -41,6 +43,7 @@ public final class SessionDataController {
     SessionSettingsService settingsService,
     SessionMemoryService memoryService,
     SessionKnowledgeGraphService graphService,
+    SessionAtlasService atlasService,
     Double defaultTemperature
   ) {
     this.sessionService = sessionService;
@@ -48,6 +51,7 @@ public final class SessionDataController {
     this.storyTurnService = storyTurnService;
     this.settingsService = settingsService;
     this.memoryService = memoryService;
+    this.atlasService = atlasService;
     this.graphService = graphService;
     this.defaultTemperature = defaultTemperature;
   }
@@ -58,6 +62,7 @@ public final class SessionDataController {
     config.routes.patch("/v1/sessions/{sessionId}/config", this::patchConfiguration);
     config.routes.post("/v1/sessions/{sessionId}/undo", this::undo);
     config.routes.get("/v1/sessions/{sessionId}/state", this::state);
+    config.routes.get("/v1/sessions/{sessionId}/atlas", this::atlas);
     config.routes.put("/v1/sessions/{sessionId}/graph", this::replaceGraph);
     config.routes.post("/v1/sessions/{sessionId}/graph/reset-turn-based", this::resetGraph);
     config.routes.post("/v1/sessions/{sessionId}/graph/fill-fixed-protagonists", this::fillGraph);
@@ -109,6 +114,12 @@ public final class SessionDataController {
     }
     storyTurnService.undoLastTurn(sessionId);
     context.status(HttpStatus.NO_CONTENT);
+  }
+
+  private void atlas(Context context) {
+    String sessionId = context.pathParam("sessionId");
+    if (rejectInactiveSession(context, sessionId)) return;
+    context.json(atlasService.load(sessionId));
   }
 
   private void state(Context context) {

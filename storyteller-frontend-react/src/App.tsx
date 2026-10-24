@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from './api';
-import type { MemoryLayer, Session, SessionConfig, SessionState, StoryMessage } from './api';
+import type { MemoryLayer, Session, SessionConfig, SessionState, SessionAtlas, StoryMessage } from './api';
 import StartPage from './StartPage';
 import StoryPage from './StoryPage';
 import SettingsPage from './SettingsPage';
 import HistoryPage from './HistoryPage';
+import AtlasPage from './AtlasPage';
 import type { EditableSettings } from './SettingsPage';
 import { applyTheme, readTheme, saveTheme } from './theme';
 import type { Theme } from './theme';
@@ -14,8 +15,9 @@ export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [messages, setMessages] = useState<StoryMessage[]>([]);
   const [config, setConfig] = useState<SessionConfig | null>(null);
+  const [atlas, setAtlas] = useState<SessionAtlas | null>(null);
   const [state, setState] = useState<SessionState | null>(null);
-  const [page, setPage] = useState<'start' | 'story' | 'settings' | 'history'>('start');
+  const [page, setPage] = useState<'start' | 'story' | 'settings' | 'history' | 'atlas'>('start');
   const [prompt, setPrompt] = useState('');
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
@@ -57,6 +59,7 @@ export default function App() {
       setMessages([]);
       setConfig(null);
       setState(null);
+      setAtlas(null);
       setPrompt('');
       setPage('story');
       const history = await api.history(opened.sessionId);
@@ -101,6 +104,7 @@ export default function App() {
       setMessages([]);
       setConfig(null);
       setState(null);
+      setAtlas(null);
       setPrompt('');
       setPage('start');
     });
@@ -109,6 +113,14 @@ export default function App() {
   async function toggleInfinite() {
     if (!session) return;
     await run(async () => setSession(await api.setInfinite(session.sessionId, !session.infinite)));
+  }
+
+  async function openAtlas() {
+    if (!session) return;
+    await run(async () => {
+      setAtlas(await api.atlas(session.sessionId));
+      setPage('atlas');
+    });
   }
 
   async function openHistory() {
@@ -140,10 +152,12 @@ export default function App() {
     {page === 'story' && session && <StoryPage session={session} messages={messages} busy={busy}
       prompt={prompt} onPromptChange={setPrompt} onSend={() => { void sendPrompt(); }}
       onSettings={() => { void openSettings(); }} onStop={() => { void stopStory(); }}
-      onInfinite={() => { void toggleInfinite(); }} onHistory={() => { void openHistory(); }} />}
+      onAtlas={() => { void openAtlas(); }} onInfinite={() => { void toggleInfinite(); }} onHistory={() => { void openHistory(); }} />}
     {page === 'settings' && config && <SettingsPage config={config} busy={busy} theme={theme}
       onThemeChange={theme => { setTheme(theme); applyTheme(theme); saveTheme(theme); }}
       onSave={settings => { void saveSettings(settings); }} onBack={() => setPage('story')} />}
+    {page === 'atlas' && atlas && <AtlasPage key={atlas.sessionId} atlas={atlas} busy={busy}
+      onRefresh={() => { void openAtlas(); }} onBack={() => setPage('story')} />}
     {page === 'history' && state && <HistoryPage state={state} busy={busy}
       onReset={layer => { void resetMemory(layer); }} onBack={() => setPage('story')} />}
   </>;

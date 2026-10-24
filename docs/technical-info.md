@@ -599,6 +599,10 @@ Not yet.
 ```
 
 ## Changelog
+### 2.1.2
+- Renamed Dark sci-fi to Ski-fi and added Passion, Summer, and Evening themes in both web frontends.
+- Added a searchable story atlas combining Fixed protagonists profiles with knowledge-graph facts and linked entries in both frontends.
+
 ### 2.1.1
 - Added themes. Choose default (brown), Dark ski-fi (black-neon), nature (green) or ocean (blue).
 

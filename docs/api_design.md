@@ -124,6 +124,20 @@ session graph facts into model context and schedules turn-based extraction after
 the configured `graph.turnBased.batchTurns` threshold is reached and stores the resulting revision in the same session.
 The graph update uses the same Core extraction and validation behavior as the CLI.
 
+### Story atlas
+
+Both web frontends expose a read-only atlas combining the session’s saved Fixed protagonists YAML with its knowledge graph. The bundled interface serves
+`GET /story/atlas`; React uses `GET /v1/sessions/{sessionId}/atlas`. A shared service builds the entry names, aliases,
+and readable fact sentences using the configured predicate catalog, including negative predicates. Character profiles
+retain arbitrary nested YAML fields and lists in a separate section, including profiles not present in the graph.
+Only unambiguous one-to-one name or alias matches are attached to graph characters; ambiguous profiles are kept separate.
+Profile values and graph facts never overwrite each other. Category changes immediately update the list and details
+and clear the previous search term. Facts are attached
+to both endpoints for navigation while their original subject/object direction is preserved. Active facts are shown
+separately from proposed, retracted, and superseded facts. No model requests or graph writes occur when opening or
+refreshing the atlas. Empty categories and entities without active facts remain browsable. Graph updates are
+asynchronous; the displayed revision identifies the loaded snapshot, not a processed-turn count.
+
 ### Images
 
 Prompt images are stored as BLOB data with their message record, not as ordinary files beside the database. The web interface accepts pasted images, shows a clickable thumbnail beside the associated prompt, and presents the full image in a dismissible overlay.
@@ -164,6 +178,7 @@ The public API exposes the same operations as the bundled web interface. Respons
 | `GET` | `/v1/sessions/{sessionId}/config` | Read editable prompts and the session temperature. |
 | `PATCH` | `/v1/sessions/{sessionId}/config` | Update only the supplied configuration fields. |
 | `POST` | `/v1/sessions/{sessionId}/undo` | Undo the latest persisted exchange. |
+| `GET` | `/v1/sessions/{sessionId}/atlas` | Read named graph entries and readable, directed facts with statuses and sources. |
 | `GET` | `/v1/sessions/{sessionId}/state` | Read derived memory, its cursors, and the knowledge graph. |
 | `PATCH` | `/v1/sessions/{sessionId}` | Set the session's infinite lifetime explicitly. |
 | `DELETE` | `/v1/sessions/{sessionId}` | Delete a non-infinite session and its dependent records. |

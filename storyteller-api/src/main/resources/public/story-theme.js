@@ -1,6 +1,7 @@
 (() => {
   const cookieName = "storyteller_theme";
-  const validTheme = value => value === "dark-sci-fi" || value === "nature" || value === "ocean" ? value : "default";
+  const validTheme = value => value === "dark-sci-fi" || value === "nature" || value === "ocean"
+    || value === "passion" || value === "summer" || value === "evening" ? value : "default";
   let theme = "default";
   try {
     const value = document.cookie.split(";").map(cookie => cookie.trim())

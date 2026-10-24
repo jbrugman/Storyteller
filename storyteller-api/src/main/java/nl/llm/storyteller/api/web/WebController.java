@@ -9,6 +9,7 @@ import io.javalin.http.HttpStatus;
 import io.javalin.http.UploadedFile;
 import nl.llm.storyteller.api.bundle.SessionBundleService;
 import nl.llm.storyteller.api.story.SessionMemoryService;
+import nl.llm.storyteller.api.story.SessionAtlasService;
 import nl.llm.storyteller.api.story.StoryService;
 import nl.llm.storyteller.db.SessionPrompts;
 import nl.llm.storyteller.db.SessionRecord;
@@ -35,6 +36,7 @@ public final class WebController {
   private final SessionBundleService bundleService;
   private final SessionSettingsService settingsService;
   private final SessionMemoryService memoryService;
+  private final SessionAtlasService atlasService;
   private final SessionKnowledgeGraphService knowledgeGraphService;
   private final double defaultTemperature;
 
@@ -47,6 +49,7 @@ public final class WebController {
     SessionSettingsService settingsService,
     SessionMemoryService memoryService,
     SessionKnowledgeGraphService knowledgeGraphService,
+    SessionAtlasService atlasService,
     double defaultTemperature
   ) {
     this.sessionService = sessionService;
@@ -56,6 +59,7 @@ public final class WebController {
     this.bundleService = bundleService;
     this.settingsService = settingsService;
     this.memoryService = memoryService;
+    this.atlasService = atlasService;
     this.knowledgeGraphService = knowledgeGraphService;
     this.defaultTemperature = defaultTemperature;
   }
@@ -76,6 +80,7 @@ public final class WebController {
     config.routes.post("/story/settings/graph/fill-fixed-protagonists", this::fillFromFixedProtagonists);
     config.routes.post("/story/settings/graph/generate-empty", this::generateEmptyGraph);
     config.routes.get("/story/memory", this::memory);
+    config.routes.get("/story/atlas", this::atlas);
     config.routes.post("/story/memory/reset/mid-term", this::resetMidTermMemory);
     config.routes.post("/story/memory/reset/long-term", this::resetLongTermMemory);
     config.routes.post("/story/memory/reset/canonical-state", this::resetCanonicalState);
@@ -297,6 +302,19 @@ public final class WebController {
 
   private String encode(String value) {
     return java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8);
+  }
+
+  private void atlas(Context context) {
+    Optional<SessionRecord> session = activeSession(context);
+    if (session.isEmpty()) {
+      redirectToStart(context);
+      return;
+    }
+    cookieService.write(context, session.get().sessionId(), session.get().infinite());
+    context.render("atlas.jte", Map.of("page", StoryAtlasPage.from(
+      atlasService.load(session.get().sessionId()), context.queryParam("q"),
+      context.queryParam("type"), context.queryParam("entity")
+    )));
   }
 
   private void memory(Context context) {
