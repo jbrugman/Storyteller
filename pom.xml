@@ -21,7 +21,7 @@
     <maven.compiler.release>25</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <jackson.version>2.22.3</jackson.version>
-    <mysql.version>26.7.0</mysql.version>
+    <mysql.version>26.10.0</mysql.version>
     <h2.version>2.5.252</h2.version>
     <javalin.version>7.2.3</javalin.version>
     <jte.version>3.2.4</jte.version>
