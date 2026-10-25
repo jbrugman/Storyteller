@@ -1,9 +1,6 @@
-game:
-  trigger_word: "start"
-  mode: "rpg_game"
-
-fixed_protagonist:
-  - name: "Eldrin"
+fixed_protagonists:
+  Eldrin:
+    name: "Eldrin"
     race: "Elf"
     class: "Cleric / Healer"
     max_hp: 100
@@ -20,7 +17,8 @@ fixed_protagonist:
     abilities:
       - "Heal (+25 HP)"
 
-  - name: "Thorin"
+  Thorin:
+    name: "Thorin"
     race: "Dwarf"
     class: "Fighter / Tank"
     max_hp: 150
@@ -32,7 +30,8 @@ fixed_protagonist:
       - name: "Battle axe"
       - name: "Heavy shield"
 
-  - name: "Lyra"
+  Lyra:
+    name: "Lyra"
     race: "Human"
     class: "Rogue"
     max_hp: 90
@@ -47,7 +46,8 @@ fixed_protagonist:
       - name: "Smoke Bomb"
         quantity: 2
 
-  - name: "Vaelen"
+  Vaelen:
+    name: "Vaelen"
     race: "Tiefling"
     class: "Wizard"
     max_hp: 80
@@ -60,6 +60,10 @@ fixed_protagonist:
       - name: "Magic Staff"
       - name: "Mana Potion"
         quantity: 1
+
+game:
+  trigger_word: "start"
+  mode: "rpg_game"
 
 world_view:
   reality:
@@ -89,17 +93,17 @@ world_physics:
     - physical danger should remain plausible within game mechanics
 
 scenarios:
-  - id: "sunken_temple"
-    title: "The Sunken Temple of Skarath"
-    setting: "Ancient, partially submerged ruins in a foggy swamp, filled with ancient traps and aquatic threats."
-    main_objective: "Retrieve the Sun Amulet from the deepest chamber and escape alive."
-    antagonist: "Skarath, the Cursed Serpent Priest."
-
   - id: "curse_of_shadowwood"
     title: "The Curse of Shadowwood"
     setting: "A dark, ancient forest where the trails shift unpredictably and shadows seem alive."
     main_objective: "Find and destroy the source of corruption blighting the nearby village."
     antagonist: "The Night Hag of the Black Mire."
+
+  - id: "sunken_temple"
+    title: "The Sunken Temple of Skarath"
+    setting: "Ancient, partially submerged ruins in a foggy swamp, filled with ancient traps and aquatic threats."
+    main_objective: "Retrieve the Sun Amulet from the deepest chamber and escape alive."
+    antagonist: "Skarath, the Cursed Serpent Priest."
 
   - id: "siege_of_karrak"
     title: "The Siege of Karrak Hold"
