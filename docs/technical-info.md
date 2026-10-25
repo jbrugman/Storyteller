@@ -603,6 +603,8 @@ Not yet.
 - New turn-based characters are admitted when both first name and surname are explicitly established by an
   introduction in the supplied assistant story responses and the same person is named in at least three distinct
   responses in that extraction batch.
+- Small bugfix in fixed protagonist example D&D
+- Updated dependencies dependabot
 
 ### 2.1.2
 - Renamed Dark sci-fi to Ski-fi and added Passion, Summer, and Evening themes in both web frontends.
