@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Story settings</title>
+    <script src="story-theme.js"></script>
+    <link rel="stylesheet" href="storyteller.css">
+    <link rel="stylesheet" href="demo.css">
+    <script src="demo-data.js" defer></script>
+    <script src="demo.js" defer></script>
+  </head>
+  <body>
+    <p class="demo-notice" role="note">Demo · Sample data · No AI or server connection</p>
+    <main class="settings-page">
+      <header class="story-header">
+        <div>
+          <p class="eyebrow">Storyteller</p>
+          <h1>Story settings</h1>
+        </div>
+        <a class="header-action" href="story.html">Back to story</a>
+      </header>
+
+      <section class="panel theme-settings" aria-label="Appearance">
+        <label for="theme">Theme</label>
+        <select id="theme">
+          <option value="default">Default</option>
+          <option value="dark-sci-fi">Ski-fi</option>
+          <option value="nature">Nature</option>
+          <option value="ocean">Ocean</option>
+          <option value="passion">Passion</option>
+          <option value="summer">Summer</option>
+          <option value="evening">Evening</option>
+        </select>
+        <p class="setting-hint">Applies immediately and is remembered in this browser when local storage is enabled.</p>
+      </section>
+
+      <form method="post" action="#" data-inactive class="panel settings-form">
+        <p class="intro">
+          Example settings. Changes are not saved; the theme selector above is fully functional.
+        </p>
+
+        <label for="systemPrompt">System prompt</label>
+        <textarea id="systemPrompt" name="systemPrompt" rows="12" maxlength="1000000"
+                  required></textarea>
+
+        <label for="fixedProtagonists">Fixed protagonists (YAML)</label>
+        <textarea id="fixedProtagonists" name="fixedProtagonists" rows="12" maxlength="1000000"
+                  aria-invalid="false"
+                  required></textarea>
+
+        <label for="rules">Rules</label>
+        <textarea id="rules" name="rules" rows="12" maxlength="1000000"
+                  required></textarea>
+
+        <label for="knowledgeGraph">Knowledge graph (JSON)</label>
+        <textarea id="knowledgeGraph" name="knowledgeGraph" rows="18" maxlength="1000000"
+                  aria-invalid="false"
+                  required></textarea>
+
+        <fieldset class="temperature-fieldset">
+          <label for="temperature">Chat temperature</label>
+          <p class="setting-hint">
+            Controls randomness in the story. Lower values are more deterministic, higher values are more creative.
+            Range: 0 (exact) to 2 (maximally diverse).
+          </p>
+          <div class="temperature-control">
+            <input type="range" id="temperature" name="temperature" min="0" max="2" step="0.01" value="0.6">
+            <output id="temperatureValue" for="temperature">
+              0.60
+            </output>
+          </div>
+        </fieldset>
+
+        <div class="graph-tools" aria-label="Knowledge graph actions">
+          <span>Graph tools</span>
+          <button disabled title="Unavailable in the demo" class="compact-button" type="submit"
+                  data-graph-action="generate">Generate empty</button>
+          <button disabled title="Unavailable in the demo" class="compact-button" type="submit"
+                  data-graph-action="fill">Fill from protagonists</button>
+          <button disabled title="Unavailable in the demo" class="compact-button danger-button" type="submit"
+                  data-graph-action="reset">Reset turn-based</button>
+        </div>
+
+        <div class="settings-actions">
+          <button disabled title="Unavailable in the demo" type="submit">Save settings</button>
+        </div>
+      </form>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,10 @@
+.demo-notice {
+  margin: 0;
+  padding: 0.5rem 1rem;
+  text-align: center;
+  color: var(--accent);
+  background: var(--background);
+  font-size: 0.8rem;
+}
+.story-page { height: calc(100dvh - 2.5rem); }
+button:disabled { cursor: not-allowed; opacity: 0.5; }

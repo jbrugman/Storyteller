@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Demo story</title>
+    <script src="story-theme.js"></script>
+    <link rel="stylesheet" href="storyteller.css">
+    <link rel="stylesheet" href="demo.css">
+    <script src="demo.js" defer></script>
+  </head>
+  <body>
+    <p class="demo-notice" role="note">Demo · Every prompt receives a fixed reply · No AI or server connection</p>
+    <main id="story-page" class="story-page">
+      <header class="story-header">
+        <div>
+          <p class="eyebrow">Storyteller</p>
+          <h1>Demo story</h1>
+        </div>
+        <div class="session-actions">
+          <a id="session-atlas" class="header-action" href="atlas.html">Atlas</a>
+          <a id="session-history" class="header-action session-history" href="history.html">History</a>
+          <a id="session-settings" class="header-action session-settings" href="settings.html">Settings</a>
+          <button type="button" class="header-action" disabled>Infinite</button>
+          <button type="button" class="header-action" disabled>Export</button>
+          <a class="header-action stop-story" href="index.html">Stop story</a>
+        </div>
+      </header>
+
+      <section id="conversation" class="conversation" aria-live="polite"
+               data-has-older="false">
+        <div class="conversation-heading">
+          <span>Prompt</span>
+          <span class="response-heading">
+            <span class="response-label">Response</span>
+            <span class="heading-actions">
+              <button id="response-layout-toggle" type="button" aria-pressed="false">Single</button>
+              <button id="response-width-toggle" type="button" aria-pressed="false">Maximize</button>
+            </span>
+          </span>
+        </div>
+        <div class="empty-state"><h2>Begin the story</h2><p>Describe the opening scene or tell the storyteller what should happen next.</p></div>
+      </section>
+
+      <form id="composer" action="#" class="composer">
+        <label for="prompt">What happens next?</label>
+        <textarea id="prompt" name="prompt" rows="3" maxlength="100000" required autofocus></textarea>
+        <p id="image-error" role="alert" hidden></p>
+        <div id="image-preview" class="image-preview" hidden>
+          <img id="image-preview-thumbnail" alt="Image ready to send">
+          <span id="image-preview-name"></span>
+          <button id="remove-image" type="button" class="remove-image">Remove</button>
+        </div>
+        <div class="composer-actions">
+          <label class="image-picker" for="image">Add image</label>
+          <input id="image" name="image" type="file" accept="image/png,image/jpeg" hidden>
+          <span id="past-reference-count" class="past-reference-count">0/3 past exchanges</span>
+          <button id="undo-story" type="button"
+                  class="undo-story"
+                  data-undo-available="false">Undo</button>
+          <button id="continue-story" type="submit">Continue story</button>
+        </div>
+      </form>
+    </main>
+  </body>
+</html>
