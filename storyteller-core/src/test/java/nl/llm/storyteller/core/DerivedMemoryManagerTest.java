@@ -24,6 +24,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -32,9 +33,32 @@ import java.util.concurrent.locks.LockSupport;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DerivedMemoryManagerTest {
+    @Test
+    @DisplayName("""
+        Given a canonical-state manager whose queue has been closed,
+        When an update submission is rejected,
+        Then a subsequent update should also attempt submission instead of remaining marked as running
+        """)
+    void shouldResetRunningAfterRejectedSubmission() throws Exception {
+        TestContext context = createContext("canonicalState.batchMessages=1");
+        context.historyStore().appendTurn("Turn one", "Reply one");
+        CanonicalStateManager manager = createCanonicalStateManager(context, new NoOpChatClient());
+        try {
+            manager.shutdown();
+
+            assertThrows(RejectedExecutionException.class, manager::startUpdateIfNeeded);
+            assertThrows(RejectedExecutionException.class, manager::startUpdateIfNeeded);
+            assertEquals(0, context.historyStore().load().canonicalStateCursor());
+            assertEquals("", manager.loadCanonicalState());
+        } finally {
+            manager.shutdown();
+        }
+    }
+
     @Test
     @DisplayName("""
         Given one completed story turn and a canonical-state batch size of one message,

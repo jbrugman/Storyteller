@@ -36,6 +36,10 @@ explicit model selection: set `model.chat` and, when validation uses a different
 separate memory server is configured, set `memory.http.model` for that server. A client without an explicit model uses
 Chat Completions directly so the backend can retain its loaded/default-model behavior.
 
+
+## Wireframe demo:
+https://jbrugman.github.io/Storyteller/settings.html
+
 ## History
 Storyteller started as a small assistant app and gradually evolved into a dedicated storytelling tool.
 

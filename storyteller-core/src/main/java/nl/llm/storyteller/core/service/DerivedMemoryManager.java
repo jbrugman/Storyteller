@@ -5,6 +5,7 @@ import nl.llm.storyteller.core.model.Message;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 abstract class DerivedMemoryManager {
@@ -64,7 +65,12 @@ abstract class DerivedMemoryManager {
       }
 
       running.set(true);
-      taskQueue.submit(() -> runJob(job));
+      try {
+        taskQueue.submit(() -> runJob(job));
+      } catch (RejectedExecutionException failure) {
+        running.set(false);
+        throw failure;
+      }
     }
   }
 
