@@ -19,10 +19,14 @@ import nl.llm.storyteller.core.service.HistoryStore;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Path;
+import java.nio.file.Files;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -63,26 +67,34 @@ class TurnBasedKnowledgeGraphServiceTest {
             "predicate":"POSSESSES",
             "object":"item.microphone",
             "polarity":"POSITIVE"
-          }]
+          }],
+          "characterEvidence": {"character.valerie": {
+            "firstName":"Valerie", "lastName":"Thorne",
+            "introduction":{"response":1,"quote":"My name is Valerie Thorne."},
+            "mentions":[{"response":1,"name":"Valerie Thorne"},
+              {"response":2,"name":"Valerie"},{"response":3,"name":"Thorne"}]
+          }}
         }
         """;
     };
     try (DerivedMemoryTaskQueue queue = new DerivedMemoryTaskQueue()) {
       TurnBasedKnowledgeGraphService service = service(context, client, queue);
-      appendTurn(context.historyStore(), 1);
+      context.historyStore().appendTurn("Turn 1", "Reply 1. My name is Valerie Thorne.");
       service.startUpdateIfNeeded();
-      appendTurn(context.historyStore(), 2);
+      context.historyStore().appendTurn("Turn 2", "Reply 2. Valerie returns.");
       service.startUpdateIfNeeded();
 
       assertFalse(completed.await(100, TimeUnit.MILLISECONDS));
 
-      appendTurn(context.historyStore(), 3);
+      context.historyStore().appendTurn("Turn 3", "Reply 3. Thorne speaks.");
       service.startUpdateIfNeeded();
 
       assertTrue(completed.await(5, TimeUnit.SECONDS));
       assertTrue(queue.awaitIdle(5, TimeUnit.SECONDS));
       KnowledgeGraphDocument graph = context.store().load();
       assertEquals(FactSource.TURNBASED, graph.entities().get("character.valerie").source());
+      assertEquals("Valerie Thorne", graph.entities().get("character.valerie").name());
+      assertEquals(List.of("Valerie"), graph.entities().get("character.valerie").aliases());
       assertEquals(FactSource.TURNBASED, graph.entities().get("item.microphone").source());
       assertEquals(FactSource.TURNBASED, graph.facts().getFirst().source());
       assertEquals(3, graph.facts().getFirst().sourceTurn());
@@ -314,6 +326,88 @@ class TurnBasedKnowledgeGraphServiceTest {
   }
 
   private static final PredicateId WEARS_ID = new PredicateId("WEARS");
+
+  @Test
+  @DisplayName("""
+    Given a qualified new character without relationship facts and an unqualified character with a possession,
+    When an automatic graph update is persisted,
+    Then only the qualified character is stored and facts referring to the rejected character are omitted
+    """)
+  void shouldPersistQualifiedStandaloneCharactersWithoutDanglingFacts() throws Exception {
+    // Given
+    TestContext context = context();
+    context.historyStore().appendTurn("Opening", "My name is Mila de Vries.");
+    context.historyStore().appendTurn("Continue", "Mila returns.");
+    context.historyStore().appendTurn("Continue", "de Vries speaks.");
+    AtomicReference<String> supplied = new AtomicReference<>();
+    ChatClient client = (messages, _, _) -> {
+      supplied.set(messages.getLast().content());
+      return """
+        {"schemaVersion":1,"revision":0,"entities":{
+          "character.mila":{"type":"CHARACTER","name":"Mila","aliases":[]},
+          "character.bob":{"type":"CHARACTER","name":"Bob","aliases":[]},
+          "item.compass":{"type":"ITEM","name":"Compass","aliases":[]}
+        },"facts":[{"id":"fact.bob_compass","subject":"character.bob",
+          "predicate":"POSSESSES","object":"item.compass","polarity":"POSITIVE"}],
+        "characterEvidence":{"character.mila":{
+          "firstName":"Mila","lastName":"de Vries",
+          "introduction":{"response":1,"quote":"My name is Mila de Vries."},
+          "mentions":[{"response":1,"name":"Mila de Vries"},
+            {"response":2,"name":"Mila"},{"response":3,"name":"de Vries"}]
+        }}}
+        """;
+    };
+
+    // When
+    try (DerivedMemoryTaskQueue queue = new DerivedMemoryTaskQueue()) {
+      service(context, client, queue).updateFromTurns(context.historyStore().load().messages(), 3);
+    }
+
+    // Then
+    var graph = context.store().load();
+    assertEquals(1, graph.revision());
+    assertEquals(Set.of("character.mila"), graph.entities().keySet());
+    assertEquals("Mila de Vries", graph.entities().get("character.mila").name());
+    assertEquals(List.of("Mila"), graph.entities().get("character.mila").aliases());
+    assertEquals(FactSource.TURNBASED, graph.entities().get("character.mila").source());
+    assertTrue(graph.facts().isEmpty());
+    assertEquals(graph.entities().get("character.mila"),
+      context.graphService().current().entity(new EntityId("character.mila")).orElseThrow());
+    assertTrue(supplied.get().contains("Story response 1\nASSISTANT: My name is Mila de Vries."));
+    assertTrue(supplied.get().contains("Story response 3\nASSISTANT: de Vries speaks."));
+    assertFalse(Files.readString(tempDir.resolve("knowledge-graph.json")).contains("characterEvidence"));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"LIVES", "LIVES_WITH"})
+  @DisplayName("""
+    Given a stored turn-based character whose only fact is an obsolete residence fact,
+    When residence facts are cleaned up during a graph update,
+    Then the named character remains while the residence fact and unreferenced location are removed
+    """)
+  void shouldRetainStandaloneCharactersDuringResidenceCleanup(String predicate) {
+    // Given
+    TestContext context = context();
+    var person = new EntityId("character.mila");
+    var other = new EntityId(predicate.equals("LIVES") ? "location.home" : "character.nora");
+    var current = new KnowledgeGraphDocument(1, 2, Map.of(
+      person.value(), new Entity(EntityType.CHARACTER, "Mila de Vries", List.of("Mila"), FactSource.TURNBASED),
+      other.value(), new Entity(predicate.equals("LIVES") ? EntityType.LOCATION : EntityType.CHARACTER,
+        "Other", List.of(), FactSource.TURNBASED)
+    ), List.of(fact("fact.residence", person, new PredicateId(predicate), other,
+      Polarity.POSITIVE, FactSource.TURNBASED, false)));
+
+    // When
+    KnowledgeGraphDocument merged;
+    try (DerivedMemoryTaskQueue queue = new DerivedMemoryTaskQueue()) {
+      merged = service(context, (_, _, _) -> "", queue).merge(current, KnowledgeGraphDocument.empty(), 3);
+    }
+
+    // Then
+    assertEquals(current.entities().get(person.value()), merged.entities().get(person.value()));
+    assertTrue(merged.facts().isEmpty());
+    assertEquals(predicate.equals("LIVES_WITH"), merged.entities().containsKey(other.value()));
+  }
 
   private TestContext context() {
     KnowledgeGraphStore store = new KnowledgeGraphStore(tempDir.resolve("knowledge-graph.json"));
