@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Story history</title>
+    <script src="story-theme.js"></script>
+    <link rel="stylesheet" href="storyteller.css">
+    <link rel="stylesheet" href="demo.css">
+    <script src="demo.js" defer></script>
+  </head>
+  <body>
+    <p class="demo-notice" role="note">Demo · Sample data · No AI or server connection</p>
+    <main class="settings-page">
+      <header class="story-header">
+        <div>
+          <p class="eyebrow">Storyteller</p>
+          <h1>Story history</h1>
+        </div>
+        <a class="header-action" href="story.html">Back to story</a>
+      </header>
+
+      <section class="panel settings-form">
+        <p class="intro">
+          These read-only summaries are generated from older story turns and supplied to subsequent model requests.
+        </p>
+
+        <label for="recentSummary">Mid-term history · processed messages: 4</label>
+        <textarea id="recentSummary" rows="12" readonly
+                  placeholder="No mid-term history has been generated yet.">Mira arrived at the Lantern Harbor and discovered a sealed letter.</textarea>
+
+        <label for="summary">Long-term history · processed messages: 2</label>
+        <textarea id="summary" rows="16" readonly
+                  placeholder="No long-term history has been generated yet.">An explorer follows a trail of lanterns toward an unfamiliar island.</textarea>
+
+        <label for="canonicalState">Canonical state · processed messages: 4</label>
+        <textarea id="canonicalState" rows="16" readonly
+                  placeholder="No canonical state has been generated yet.">Mira is at the Lantern Harbor. The letter remains sealed.</textarea>
+
+        <form class="memory-actions" action="#" data-inactive aria-label="Memory reset actions" style="display: flex; gap: 0.5rem; align-items: center;">
+          <span>Memory reset</span>
+          <button disabled title="Unavailable in the demo" class="compact-button danger-button" type="submit"
+                  data-memory-action="reset-mid-term">Reset mid-term</button>
+          <button disabled title="Unavailable in the demo" class="compact-button danger-button" type="submit"
+                  data-memory-action="reset-long-term">Reset long-term</button>
+          <button disabled title="Unavailable in the demo" class="compact-button danger-button" type="submit"
+                  data-memory-action="reset-canonical-state">Reset canonical state</button>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>

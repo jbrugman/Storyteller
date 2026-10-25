@@ -122,6 +122,10 @@ The native executable accepts the same option: `./valerie --session <session-id>
 
 ## Use the API and web interface
 
+For a static, interactive demo of the Java template frontend, see the
+[frontend wireframe](wireframe/README.md). It includes all themes and fixed demo
+replies, and can be published to GitHub Pages without running a backend.
+
 For a small independent frontend and an introduction to React, see the
 [React + TypeScript example](storyteller-frontend-react/README.md).
 

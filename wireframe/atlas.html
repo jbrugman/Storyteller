@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Story atlas</title><script src="story-theme.js"></script>
+  <link rel="stylesheet" href="storyteller.css"><link rel="stylesheet" href="demo.css">
+  <script src="demo-data.js" defer></script>
+    <script src="demo.js" defer></script>
+</head>
+<body>
+  <p class="demo-notice" role="note">Demo · Sample data · No AI or server connection</p>
+  <main class="settings-page atlas-page">
+    <header class="story-header">
+      <div><p class="eyebrow">Storyteller</p><h1>Story atlas</h1></div>
+      <div class="session-actions"><a class="header-action" href="atlas.html">Refresh</a><a class="header-action" href="story.html">Back to story</a></div>
+    </header>
+    <p class="intro">Explore example character profiles and linked facts from the knowledge graph.</p>
+    <div class="atlas-layout">
+      <aside class="panel settings-form atlas-index" aria-label="Atlas entries">
+        <form id="atlas-search-form" class="atlas-search" action="atlas.html" method="get">
+          <label for="atlas-search">Search names and aliases</label><input id="atlas-search" name="q" type="search">
+          <label for="atlas-type">Category</label>
+          <select id="atlas-type" name="type">
+            <option value="CHARACTER">Characters</option>
+            <option value="LOCATION">Locations</option>
+            <option value="ITEM">Items</option>
+            <option value="SKILL">Skills</option>
+          </select>
+          <button type="submit">Search</button>
+        </form>
+        <nav id="atlas-list" class="atlas-list" aria-label="Matching entries"></nav>
+      </aside>
+      <section id="atlas-detail" class="panel settings-form atlas-detail" aria-label="Entry details"></section>
+    </div>
+    <p class="setting-hint atlas-revision">Graph revision: 1 · Fictional demo data.</p>
+  </main>
+</body>
+</html>

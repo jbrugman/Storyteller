@@ -1,0 +1,31 @@
+:root[data-theme="ocean"] {
+  --background: #081423;
+  --text: #e5effa;
+  --glow: rgba(54, 132, 196, 0.18);
+  --action-border: #3c6385;
+  --accent: #87c8f5;
+  --action-hover: #193650;
+  --muted: #8ca6bd;
+  --border: #263f57;
+  --panel: rgba(16, 36, 56, 0.92);
+  --text-secondary: #afc5da;
+  --text-subtle: #7c98b2;
+  --input-border: #355675;
+  --input-background: #0b1c2e;
+  --input-text: #edf5ff;
+  --focus-ring: rgba(135, 200, 245, 0.18);
+  --button-text: #0b2134;
+  --accent-hover: #addcff;
+  --button-disabled: #456681;
+  --session-id: #9ebbd4;
+  --conversation: rgba(10, 26, 43, 0.92);
+  --heading: #142d45;
+  --prompt: #18334b;
+  --reference-muted: #90abc3;
+  --image-focus: #87c8f5;
+  --preview-text: #b8cee2;
+  --hint: #99b3cb;
+  --reset-border: var(--action-border);
+  --reset-text: var(--accent);
+  --reset-hover: var(--action-hover);
+}
