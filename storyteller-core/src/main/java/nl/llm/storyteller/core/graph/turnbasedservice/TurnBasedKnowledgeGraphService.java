@@ -1,10 +1,12 @@
 package nl.llm.storyteller.core.graph.turnbasedservice;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import nl.llm.storyteller.core.JsonSupport;
 import nl.llm.storyteller.core.graph.KnowledgeGraphJsonResponse;
 import nl.llm.storyteller.core.graph.PredicateCatalog;
 import nl.llm.storyteller.core.graph.model.Entity;
 import nl.llm.storyteller.core.graph.model.EntityId;
+import nl.llm.storyteller.core.graph.model.EntityType;
 import nl.llm.storyteller.core.graph.model.Fact;
 import nl.llm.storyteller.core.graph.model.FactKey;
 import nl.llm.storyteller.core.graph.model.FactSource;
@@ -133,7 +135,7 @@ public final class TurnBasedKnowledgeGraphService {
         options,
         timeoutSeconds
       );
-      KnowledgeGraphDocument candidate = parse(rawResponse);
+      KnowledgeGraphDocument candidate = parse(rawResponse, current, turns);
       if (!batchStillPresent(turns, latestTurn)) {
         return;
       }
@@ -183,7 +185,7 @@ public final class TurnBasedKnowledgeGraphService {
       .collect(Collectors.toSet());
     candidate.entities().forEach((id, entity) -> {
       Entity existing = entities.get(id);
-      if (candidateReferences.contains(new EntityId(id))
+      if ((entity.type() == EntityType.CHARACTER || candidateReferences.contains(new EntityId(id)))
         && (existing == null || existing.source() == FactSource.TURNBASED)) {
         entities.put(id, new Entity(entity.type(), entity.name(), entity.aliases(), FactSource.TURNBASED));
       }
@@ -248,7 +250,8 @@ public final class TurnBasedKnowledgeGraphService {
       Entity entity = entities.get(entityId.value());
       boolean stillReferenced = facts.stream().anyMatch(fact ->
         entityId.equals(fact.subject()) || entityId.equals(fact.object()));
-      if (entity != null && entity.source() == FactSource.TURNBASED && !stillReferenced) {
+      if (entity != null && entity.type() != EntityType.CHARACTER
+        && entity.source() == FactSource.TURNBASED && !stillReferenced) {
         entities.remove(entityId.value());
       }
     });
@@ -268,9 +271,11 @@ public final class TurnBasedKnowledgeGraphService {
       && new FactKey(fact.subject(), fact.predicate(), fact.object()).equals(key);
   }
 
-  private KnowledgeGraphDocument parse(String response) {
+  private KnowledgeGraphDocument parse(String response, KnowledgeGraphDocument current, List<Message> turns) {
     try {
-      return codec.fromJson(KnowledgeGraphJsonResponse.extract(response));
+      String json = KnowledgeGraphJsonResponse.extract(response);
+      return TurnBasedCharacterAdmission.apply(current, codec.fromJson(json),
+        JsonSupport.OBJECT_MAPPER.readTree(json).path("characterEvidence"), turns);
     } catch (JsonProcessingException ex) {
       throw new IllegalArgumentException("The model returned an invalid turn-based knowledge graph", ex);
     }
@@ -286,8 +291,8 @@ public final class TurnBasedKnowledgeGraphService {
         "entities": {
           "character.alice": {
             "type": "CHARACTER",
-            "name": "Alice",
-            "aliases": [],
+            "name": "Alice Bennett",
+            "aliases": ["Alice"],
             "source": "TURNBASED"
           },
           "item.compass": {
@@ -309,7 +314,15 @@ public final class TurnBasedKnowledgeGraphService {
             "sourceTurn": null,
             "hard": false
           }
-        ]
+        ],
+        "characterEvidence": {
+          "character.alice": {
+            "firstName": "Alice", "lastName": "Bennett",
+            "introduction": {"response": 1, "quote": "My name is Alice Bennett."},
+            "mentions": [{"response": 1, "name": "Alice Bennett"},
+                         {"response": 2, "name": "Alice"}, {"response": 3, "name": "Bennett"}]
+          }
+        }
       }
       The example only demonstrates the schema. Do not copy Alice or the compass unless the supplied turns support them.
       `entities` must be a JSON object keyed by entity ID, never an array and never a name-to-type map.
@@ -318,6 +331,25 @@ public final class TurnBasedKnowledgeGraphService {
       object, polarity, status, source, sourceTurn, and hard. References must use IDs present in `entities`
       or already present in the current graph.
       Reuse stable entity and fact IDs from the current graph when applicable.
+      Only add a NEW character when both their first name and last name are explicitly established
+      by an introduction in the supplied story responses, and their name appears in at least THREE
+      distinct numbered assistant story responses in this input. First-name-only or surname-only
+      characters must not be added. Importance never overrides these requirements. User prompts,
+      pronouns, and repeated mentions within one response do not count as additional responses.
+      Store the canonical name as Firstname Lastname and include Firstname as an alias. Never invent
+      either name part. Existing graph characters retain their stable IDs, names, and aliases and
+      do not need to qualify again. Eligible new characters may have no relationship facts at all.
+      For EACH new character, include a characterEvidence entry keyed by their entity ID with:
+      {"firstName":"the actual given name","lastName":"the actual surname",
+       "introduction":{"response":1,"quote":"an exact quotation explicitly introducing the full name"},
+       "mentions":[{"response":1,"name":"the actual full name"},
+                   {"response":2,"name":"the actual given name"},
+                   {"response":3,"name":"the actual surname"}]}
+      Response numbers refer to the numbered assistant story responses in the supplied input and
+      may be non-consecutive. Quote real text and list only actual first-name, surname, or full-name
+      mentions clearly referring to that person. An ambiguous shared name must not count. Omit
+      ineligible new characters and facts referring to them. characterEvidence is extraction-only
+      verification data, not part of the persisted knowledge graph.
       Every entity and fact must use source TURNBASED. Facts must use status ACTIVE, hard false,
       and one of these configured directional predicates: %s.
       Do not guess, infer uncertain information, or repeat unrelated facts from the current graph.
@@ -350,7 +382,9 @@ public final class TurnBasedKnowledgeGraphService {
     StringBuilder prompt = new StringBuilder("Current graph for ID reference:\n")
       .append(codec.toJson(current).toPrettyString())
       .append("\n\nCompleted turns to extract:\n");
+    int responseNumber = 0;
     for (Message message : turns) {
+      if ("assistant".equals(message.role())) prompt.append("Story response ").append(++responseNumber).append('\n');
       prompt.append(message.role().toUpperCase()).append(": ").append(message.content()).append('\n');
     }
     return prompt.toString().trim();

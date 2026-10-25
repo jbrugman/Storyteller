@@ -1,6 +1,7 @@
 package nl.llm.storyteller.api.story;
 
 import nl.llm.storyteller.core.config.AppConfig;
+import nl.llm.storyteller.core.JsonSupport;
 import nl.llm.storyteller.db.Database;
 import nl.llm.storyteller.db.JdbcSessionBundleRepository;
 import nl.llm.storyteller.db.JdbcSessionRepository;
@@ -21,6 +22,8 @@ import nl.llm.storyteller.db.SessionRecord;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Path;
 import java.time.Instant;
@@ -62,36 +65,54 @@ class SessionKnowledgeGraphServiceTest {
         "source": "TURNBASED",
         "sourceTurn": null,
         "hard": false
-      }]
+      }],
+      "characterEvidence": {"character.alice": {
+        "firstName":"Alice", "lastName":"Bennett",
+        "introduction":{"response":1,"quote":"My name is Alice Bennett."},
+        "mentions":[{"response":1,"name":"Alice Bennett"},
+          {"response":2,"name":"Alice"},{"response":3,"name":"Bennett"}]
+      }}
     }
     """;
 
   @TempDir
   Path temporaryDirectory;
 
-  @Test
+  @ParameterizedTest(name = "with relationship fact: {0}")
+  @ValueSource(booleans = {true, false})
   @DisplayName("""
-    Given an API session with enough completed story turns,
+    Given an introduced full-name character mentioned in three completed story responses,
     When its derived state update is requested,
-    Then the turn-based knowledge graph should be stored for that session
+    Then the qualified character should be stored for that session with or without relationship facts
     """)
-  void shouldStoreTurnBasedKnowledgeGraphForApiSession() throws Exception {
+  void shouldStoreTurnBasedKnowledgeGraphForApiSession(boolean withFact) throws Exception {
+    // Given
+    var response = (com.fasterxml.jackson.databind.node.ObjectNode) JsonSupport.OBJECT_MAPPER.readTree(GRAPH_RESPONSE);
+    if (!withFact) {
+      response.putArray("facts");
+      ((com.fasterxml.jackson.databind.node.ObjectNode) response.path("entities")).remove("item.compass");
+    }
     Database database = database();
     createSession(database);
     appendTurns(database);
 
     try (SessionKnowledgeGraphService service = new SessionKnowledgeGraphService(
-      database, AppConfig.load(), (_, _, _) -> GRAPH_RESPONSE
+      database, AppConfig.load(), (_, _, _) -> response.toString()
     )) {
+      // When
       service.requestUpdate(SESSION_ID);
       assertTrue(service.awaitIdle());
     }
 
+    // Then
     var graph = new JdbcSessionBundleRepository(database).loadKnowledgeGraph(SESSION_ID);
     assertEquals(1, graph.revision());
-    assertEquals(2, graph.entities().size());
-    assertEquals(1, graph.facts().size());
-    assertEquals(3, graph.facts().getFirst().sourceTurn());
+    assertEquals(withFact ? 2 : 1, graph.entities().size());
+    assertEquals("Alice Bennett", graph.entities().get("character.alice").name());
+    assertEquals(List.of("Alice"), graph.entities().get("character.alice").aliases());
+    assertEquals(withFact ? 1 : 0, graph.facts().size());
+    if (withFact) assertEquals(3, graph.facts().getFirst().sourceTurn());
+    assertEquals(FactSource.TURNBASED, graph.entities().get("character.alice").source());
   }
 
   @Test
@@ -198,7 +219,7 @@ class SessionKnowledgeGraphServiceTest {
   @DisplayName("""
     Given a processed graph that is reset before its last story turn is undone,
     When a replacement turn is completed,
-    Then turn-based graph generation should be triggered again
+    Then graph generation should be triggered again without admitting an unqualified new character
     """)
   void shouldRegenerateAfterResetUndoAndReplacementTurn() throws Exception {
     Database database = database();
@@ -222,6 +243,7 @@ class SessionKnowledgeGraphServiceTest {
       ))
     ));
     AtomicInteger generationRequests = new AtomicInteger();
+    long revisionBeforeExtraction;
 
     try (SessionKnowledgeGraphService service = new SessionKnowledgeGraphService(
       database, AppConfig.load(), (_, _, _) -> {
@@ -239,12 +261,16 @@ class SessionKnowledgeGraphServiceTest {
         null,
         Instant.parse("2026-09-08T12:02:00Z")
       );
+      revisionBeforeExtraction = graphRepository(database).load().revision();
       service.requestUpdate(SESSION_ID);
       assertTrue(service.awaitIdle());
     }
 
     assertEquals(1, generationRequests.get());
-    assertEquals(1, graphRepository(database).load().facts().getFirst().sourceTurn());
+    var graph = graphRepository(database).load();
+    assertEquals(revisionBeforeExtraction + 1, graph.revision());
+    assertTrue(graph.entities().isEmpty());
+    assertTrue(graph.facts().isEmpty());
   }
 
   private Database database() {
@@ -266,8 +292,13 @@ class SessionKnowledgeGraphServiceTest {
   private void appendTurns(Database database) {
     JdbcStoryRepository stories = new JdbcStoryRepository(database);
     for (int turn = 1; turn <= 3; turn++) {
+      String response = switch (turn) {
+        case 1 -> "My name is Alice Bennett.";
+        case 2 -> "Alice returns.";
+        default -> "Bennett speaks.";
+      };
       stories.appendTurn(
-        SESSION_ID, "Prompt " + turn, "Response " + turn, null,
+        SESSION_ID, "Prompt " + turn, response, null,
         Instant.parse("2026-09-08T12:00:00Z").plusSeconds(turn)
       );
     }
