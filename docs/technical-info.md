@@ -599,6 +599,13 @@ Not yet.
 ```
 
 ## Changelog
+### 2.1.4
+- Fixed a race in derived-memory idle waiting: follow-up tasks scheduled by a running task are now included before
+  the queue reports idle, including work submitted through `submitAndWait()`. Timeouts and interruption remain supported,
+  and failed tasks or rejected submissions do not leave the pending-task count stuck.
+- Fixed derived-memory managers remaining marked as running when task submission is rejected during shutdown.
+  The running flag is now restored before the rejection is propagated.
+
 ### 2.1.3
 - New turn-based characters are admitted when both first name and surname are explicitly established by an
   introduction in the supplied assistant story responses and the same person is named in at least three distinct
