@@ -67,6 +67,52 @@ public final class ResponsesRoute implements OpenAiRoute {
     return parseResponse(body);
   }
 
+  @Override
+  public OpenAiRouteResult stream(List<Message> messages, Map<String, Object> options, int timeoutSeconds,
+    java.util.function.Consumer<String> onDelta) throws IOException, InterruptedException {
+    Map<String, Object> payload = buildPayload(messages, options);
+    payload.put("stream", true);
+    HttpResponse<InputStream> response = httpClient.send(
+      buildRequest(payload, timeoutSeconds), HttpResponse.BodyHandlers.ofInputStream());
+    if (response.statusCode() == 404 || response.statusCode() == 405 || response.statusCode() == 501) {
+      response.body().close();
+      throw new UnsupportedResponsesEndpointException("Responses endpoint is unavailable: HTTP " + response.statusCode());
+    }
+    if (response.statusCode() < 200 || response.statusCode() >= 300) {
+      try (InputStream input = response.body()) {
+        throw new IOException("Model streaming backend returned HTTP " + response.statusCode());
+      }
+    }
+    StringBuilder text = new StringBuilder();
+    OpenAiRouteResult[] completed = {null};
+    nl.llm.storyteller.core.service.openai.EventStream.read(response.body(), timeoutSeconds, data -> {
+      if ("[DONE]".equals(data)) return false;
+      JsonNode event = parse(data);
+      switch (event.path("type").asText()) {
+        case "response.output_text.delta" -> {
+          String delta = event.path("delta").asText();
+          text.append(delta);
+          onDelta.accept(delta);
+        }
+        case "response.completed" -> {
+          JsonNode result = event.path("response");
+          if (!"completed".equals(result.path("status").asText())) {
+            throw new IllegalArgumentException("Model stream did not complete successfully.");
+          }
+          completed[0] = new OpenAiRouteResult(text.toString(),
+            result.path("usage").path("output_tokens").asLong(-1),
+            result.path("usage").path("output_tokens_details").path("reasoning_tokens").asLong(-1));
+        }
+        case "error", "response.failed", "response.incomplete" ->
+          throw new IllegalArgumentException("Model stream failed or was incomplete.");
+        default -> { }
+      }
+      return completed[0] == null;
+    });
+    if (completed[0] == null) throw new IOException("Model stream ended before response.completed.");
+    return completed[0];
+  }
+
   OpenAiRouteResult parseResponse(String body) {
     JsonNode data = parse(body);
     JsonNode usage = data.path("usage");

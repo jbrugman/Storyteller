@@ -102,7 +102,9 @@ public final class SessionDataController {
       patchedText(patch.fixedProtagonists(), "fixedProtagonists"),
       patchedText(patch.rules(), "rules"),
       patch.temperature() != null,
-      patchedTemperature(patch.temperature())
+      patchedTemperature(patch.temperature()),
+      patch.streamingEnabled() != null, patchedBoolean(patch.streamingEnabled(), "streamingEnabled"),
+      patch.validationEnabled() != null, patchedBoolean(patch.validationEnabled(), "validationEnabled")
     );
     context.json(configurationResponse(sessionId, settingsService.load(sessionId)));
   }
@@ -215,8 +217,16 @@ public final class SessionDataController {
     return new SessionConfigResponse(
       sessionId, settings.prompts().systemPrompt(), settings.prompts().fixedProtagonists(),
       settings.prompts().rules(), settings.temperature(),
-      settings.temperature() != null ? settings.temperature() : defaultTemperature
+      settings.temperature() != null ? settings.temperature() : defaultTemperature,
+      settings.streamingEnabled(), settings.validationEnabled(),
+      settingsService.streamingEnabled(settings), settingsService.validationEnabled(settings)
     );
+  }
+
+  private Boolean patchedBoolean(com.fasterxml.jackson.databind.JsonNode value, String name) {
+    if (value == null || value.isNull()) return null;
+    if (!value.isBoolean()) throw new IllegalArgumentException(name + " must be a boolean or null.");
+    return value.booleanValue();
   }
 
   private SessionConfigPatchRequest parsePatch(String body) {

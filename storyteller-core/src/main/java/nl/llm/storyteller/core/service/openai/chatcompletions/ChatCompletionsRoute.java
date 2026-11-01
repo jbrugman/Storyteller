@@ -66,6 +66,43 @@ public final class ChatCompletionsRoute implements OpenAiRoute {
     return parseResponse(body);
   }
 
+  @Override
+  public OpenAiRouteResult stream(List<Message> messages, Map<String, Object> options, int timeoutSeconds,
+    java.util.function.Consumer<String> onDelta) throws IOException, InterruptedException {
+    Map<String, Object> payload = buildPayload(messages, options);
+    payload.put("stream", true);
+    payload.put("stream_options", Map.of("include_usage", true));
+    HttpResponse<InputStream> response = httpClient.send(
+      buildRequest(payload, timeoutSeconds), HttpResponse.BodyHandlers.ofInputStream());
+    if (response.statusCode() < 200 || response.statusCode() >= 300) {
+      try (InputStream input = response.body()) {
+        throw new IOException("Model streaming backend returned HTTP " + response.statusCode());
+      }
+    }
+    StringBuilder text = new StringBuilder();
+    long[] tokens = {-1, -1};
+    boolean[] finished = {false};
+    nl.llm.storyteller.core.service.openai.EventStream.read(response.body(), timeoutSeconds, data -> {
+      if ("[DONE]".equals(data)) { finished[0] = true; return false; }
+      JsonNode event = parse(data);
+      if (event.has("error")) throw new IllegalArgumentException("Model stream returned an error.");
+      JsonNode choice = event.path("choices").path(0);
+      if (choice.path("finish_reason").isTextual()
+        && !"stop".equals(choice.path("finish_reason").asText())) {
+        throw new IllegalArgumentException("Model stream did not finish normally: " + choice.path("finish_reason").asText());
+      }
+      JsonNode delta = choice.path("delta").path("content");
+      if (delta.isTextual()) { text.append(delta.asText()); onDelta.accept(delta.asText()); }
+      if (event.path("usage").isObject()) {
+        tokens[0] = event.path("usage").path("completion_tokens").asLong(-1);
+        tokens[1] = event.path("usage").path("completion_tokens_details").path("reasoning_tokens").asLong(-1);
+      }
+      return true;
+    });
+    if (!finished[0]) throw new IOException("Model stream ended before [DONE].");
+    return new OpenAiRouteResult(text.toString(), tokens[0], tokens[1]);
+  }
+
   OpenAiRouteResult parseResponse(String body) {
     JsonNode data = parse(body);
     JsonNode content = data.path("choices").path(0).path("message").path("content");

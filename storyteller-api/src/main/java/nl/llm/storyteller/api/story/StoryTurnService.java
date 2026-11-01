@@ -98,6 +98,21 @@ public final class StoryTurnService {
     StoryImage image,
     List<Integer> pastMessageIndexes
   ) throws IOException, InterruptedException {
+    return execute(sessionId, prompt, image, pastMessageIndexes, null);
+  }
+
+  public boolean streamingEnabled(String sessionId) {
+    SessionSettings settings = settingsRepository.load(sessionId);
+    boolean streaming = settings.streamingEnabled(config.streamingEnabled());
+    if (streaming && settings.validationEnabled(config.validationEnabled())) {
+      throw new IllegalArgumentException("Streaming and validation cannot both be enabled.");
+    }
+    return streaming;
+  }
+
+  public synchronized StoryTurnResult execute(String sessionId, String prompt, StoryImage image,
+    List<Integer> pastMessageIndexes, java.util.function.Consumer<String> onText)
+    throws IOException, InterruptedException {
     String userInput = normalizePrompt(prompt);
     SessionSettings settings = settingsRepository.load(sessionId);
     SessionPrompts prompts = settings.prompts();
@@ -120,12 +135,16 @@ public final class StoryTurnService {
       options = new java.util.HashMap<>(options);
       options.put("temperature", sessionTemperature);
     }
-    String draftResponse = chatClient.chat(
-      messages,
-      options,
-      config.requestTimeoutSeconds()
-    );
-    String response = validate(userInput, draftResponse, prompts);
+    boolean streaming = settings.streamingEnabled(config.streamingEnabled());
+    boolean validation = settings.validationEnabled(config.validationEnabled());
+    if (streaming && validation) {
+      throw new IllegalArgumentException("Streaming and validation cannot both be enabled.");
+    }
+    if (onText != null && !streaming) throw new IllegalArgumentException("Streaming is disabled for this session.");
+    String draftResponse = onText == null
+      ? chatClient.chat(messages, options, config.requestTimeoutSeconds())
+      : chatClient.stream(messages, options, config.requestTimeoutSeconds(), onText);
+    String response = validate(userInput, draftResponse, prompts, validation);
     StoryTurnRecord stored = repository.appendTurn(sessionId, userInput, response, image, clock.instant());
     derivedStateService.requestUpdate(sessionId);
     return new StoryTurnResult(stored.userMessageIndex(), stored.assistantMessageIndex(), response);
@@ -140,10 +159,10 @@ public final class StoryTurnService {
     repository.undoLastTurn(sessionId, clock.instant());
   }
 
-  private String validate(String userInput, String draftResponse, SessionPrompts prompts)
+  private String validate(String userInput, String draftResponse, SessionPrompts prompts, boolean validationEnabled)
     throws InterruptedException {
-    if (!config.validationEnabled()) {
-      return responseGuard.validate("", "", draftResponse);
+    if (!validationEnabled) {
+      return responseGuard.validate("", "", draftResponse, false);
     }
     String systemPrompt = validationPromptBuilder.buildSystemPrompt();
     String request = validationPromptBuilder.buildRequest(
@@ -151,7 +170,7 @@ public final class StoryTurnService {
       prompts.rules(),
       prompts.fixedProtagonists()
     );
-    return responseGuard.validate(systemPrompt, request, draftResponse);
+    return responseGuard.validate(systemPrompt, request, draftResponse, true);
   }
 
   private String normalizePrompt(String prompt) {

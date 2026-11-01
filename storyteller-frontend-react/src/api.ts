@@ -22,6 +22,10 @@ export interface SessionConfig {
   rules: string;
   temperature: number | null;
   effectiveTemperature: number | null;
+  streamingEnabled: boolean | null;
+  validationEnabled: boolean | null;
+  effectiveStreamingEnabled: boolean;
+  effectiveValidationEnabled: boolean;
 }
 
 export class ApiError extends Error {
@@ -107,13 +111,43 @@ export const api = {
   createSession: (title: string) => request<Session>('/sessions', 'POST', { title }),
   history: (id: string) => request<{ sessionId: string; messages: StoryMessage[] }>(`${sessionPath(id)}/history`),
   config: (id: string) => request<SessionConfig>(`${sessionPath(id)}/config`),
-  saveConfig: (id: string, settings: Pick<SessionConfig, 'systemPrompt' | 'fixedProtagonists' | 'rules' | 'temperature'>) =>
+  saveConfig: (id: string, settings: Pick<SessionConfig, 'systemPrompt' | 'fixedProtagonists' | 'rules' | 'temperature' | 'streamingEnabled' | 'validationEnabled'>) =>
     request<SessionConfig>(`${sessionPath(id)}/config`, 'PATCH', settings),
   resumeSession: (id: string) => request<Session>(`${sessionPath(id)}/resume`, 'POST'),
   importSession: (bundle: File) => {
     const body = new FormData();
     body.append('bundle', bundle);
     return request<Session>('/session-imports', 'POST', body);
+  },
+  streamTurn: async (id: string, prompt: string, onText: (text: string) => void) => {
+    const response = await fetch(`/v1${sessionPath(id)}/turns/stream`, {
+      method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt }),
+    });
+    if (!response.ok || !response.body) throw new Error('Generation could not start.');
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let completed = false;
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+        let end: number;
+        while ((end = buffer.indexOf('\n\n')) >= 0) {
+          const frame = buffer.slice(0, end); buffer = buffer.slice(end + 2);
+          const event = frame.split('\n').find(line => line.startsWith('event: '))?.slice(7);
+          const data = frame.split('\n').filter(line => line.startsWith('data: ')).map(line => line.slice(6)).join('\n');
+          if (!data) continue;
+          const payload = JSON.parse(data);
+          if (event === 'text') onText(payload.text);
+          if (event === 'error') throw new Error(payload.message);
+          if (event === 'done') { onText(payload.response); completed = true; }
+        }
+        if (done) break;
+      }
+      if (!completed) throw new Error('The stream ended before completion.');
+    } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
   },
   turn: (id: string, prompt: string) => request<{
     sessionId: string; userMessageIndex: number; assistantMessageIndex: number; response: string;

@@ -599,6 +599,13 @@ Not yet.
 ```
 
 ## Changelog
+### 2.1.5
+- Added the option to enable or disable the validation option in the configuration-page in the web interface. (streaming is disabled)
+- Added the option to enable or disable the streaming option in the configuration-page in the web interface. (validation is disabled)
+  Streaming writes the output directly as it is generated, instead of waiting for the entire response to be generated before displaying it. 
+  This can improve responsiveness and user experience.
+- Upgraded some new dependencies to the latest versions.
+
 ### 2.1.4
 - Fixed a race in derived-memory idle waiting: follow-up tasks scheduled by a running task are now included before
   the queue reports idle, including work submitted through `submitAndWait()`. Timeouts and interruption remain supported,

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { SessionConfig } from './api';
 import type { Theme } from './theme';
 
-export type EditableSettings = Pick<SessionConfig, 'systemPrompt' | 'fixedProtagonists' | 'rules' | 'temperature'>;
+export type EditableSettings = Pick<SessionConfig, 'systemPrompt' | 'fixedProtagonists' | 'rules' | 'temperature' | 'streamingEnabled' | 'validationEnabled'>;
 interface Props {
   config: SessionConfig;
   busy: boolean;
@@ -16,6 +16,8 @@ export default function SettingsPage({ config, busy, theme, onThemeChange, onSav
   const [systemPrompt, setSystemPrompt] = useState(config.systemPrompt);
   const [fixedProtagonists, setFixedProtagonists] = useState(config.fixedProtagonists);
   const [rules, setRules] = useState(config.rules);
+  const [streamingEnabled, setStreamingEnabled] = useState(config.effectiveStreamingEnabled);
+  const [validationEnabled, setValidationEnabled] = useState(config.effectiveValidationEnabled);
   const [useDefault, setUseDefault] = useState(config.temperature === null);
   const [temperature, setTemperature] = useState(config.temperature ?? config.effectiveTemperature ?? 1);
   return <main className="settings-page">
@@ -38,7 +40,7 @@ export default function SettingsPage({ config, busy, theme, onThemeChange, onSav
     </section>
     <form className="panel settings-form" onSubmit={event => {
       event.preventDefault();
-      onSave({ systemPrompt, fixedProtagonists, rules, temperature: useDefault ? null : temperature });
+      onSave({ systemPrompt, fixedProtagonists, rules, temperature: useDefault ? null : temperature, streamingEnabled, validationEnabled });
     }}>
       <p className="intro">These prompts belong to this session and are used for subsequent story turns and validation.</p>
       <label htmlFor="systemPrompt">System prompt</label>
@@ -50,6 +52,16 @@ export default function SettingsPage({ config, busy, theme, onThemeChange, onSav
       <label htmlFor="rules">Rules</label>
       <textarea id="rules" rows={12} maxLength={1000000} required value={rules}
         onChange={event => setRules(event.target.value)} disabled={busy} />
+      <fieldset disabled={busy}>
+        <legend>Response generation</legend>
+        <label><input type="checkbox" checked={streamingEnabled} onChange={event => {
+          setStreamingEnabled(event.target.checked); if (event.target.checked) setValidationEnabled(false);
+        }} />Streaming</label>
+        <label><input type="checkbox" checked={validationEnabled} onChange={event => {
+          setValidationEnabled(event.target.checked); if (event.target.checked) setStreamingEnabled(false);
+        }} />Validation</label>
+        <p className="setting-hint">Streaming requires validation to be off. Enabling either option turns the other off. Both may be off. Saved per session in the database.</p>
+      </fieldset>
       <fieldset className="temperature-fieldset" disabled={busy}>
         <label htmlFor="temperature">Chat temperature</label>
         <p className="setting-hint">Controls randomness in the story. Lower values are more deterministic, higher values are more creative. Range: 0 (exact) to 2 (maximally diverse).</p>

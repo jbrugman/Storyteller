@@ -2,6 +2,7 @@
 @import nl.llm.storyteller.api.web.StoryPage
 
 @param StoryPage page
+@param boolean streamingEnabled = false
 
 <!doctype html>
 <html lang="en">
@@ -102,10 +103,11 @@
         @endfor
       </section>
 
-      <form id="composer" method="post" action="/story/turns" enctype="multipart/form-data" class="composer">
+      <form id="composer" data-stream-url="${streamingEnabled ? "/v1/sessions/" + page.session().sessionId() + "/turns/stream" : null}" method="post" action="/story/turns" enctype="multipart/form-data" class="composer">
         <label for="prompt">What happens next?</label>
         <textarea id="prompt" name="prompt" rows="3" maxlength="100000" required autofocus>${page.submittedPrompt()}</textarea>
         <p id="image-error" role="alert" hidden></p>
+        <p id="generation-error" role="alert" hidden></p>
         <div id="image-preview" class="image-preview" hidden>
           <img id="image-preview-thumbnail" alt="Image ready to send">
           <span id="image-preview-name"></span>
@@ -142,6 +144,7 @@
       </div>
     </div>
     <script src="/story-images.js"></script>
+    <script src="/story-stream.js"></script>
     <script>
       const conversation = document.getElementById("conversation");
       const imageLightbox = document.getElementById("image-lightbox");
@@ -263,6 +266,7 @@
       const removeImage = document.getElementById("remove-image");
       const imagePicker = document.querySelector(".image-picker");
       const imageError = document.getElementById("image-error");
+      const generationError = document.getElementById("generation-error");
       undoButton.disabled = undoButton.dataset.undoAvailable !== "true";
       let submitting = false;
       actionLinks.forEach(link => link.addEventListener("click", event => {
@@ -372,6 +376,30 @@
         if (submitting) {
           event.preventDefault();
           return;
+        }
+        if (event.submitter === continueButton && composer.dataset.streamUrl) {
+          event.preventDefault();
+          generationError.hidden = true;
+          generationError.textContent = "";
+          const body = new FormData(composer);
+          StoryStreaming.generate(composer.dataset.streamUrl, body, document.querySelector(".conversation"))
+            .then(() => {
+              prompt.value = "";
+              window.location.reload();
+            })
+            .catch(error => {
+              generationError.textContent = error.message;
+              generationError.hidden = false;
+              submitting = false;
+              composer.setAttribute("aria-busy", "false");
+              prompt.readOnly = false;
+              imagePicker.removeAttribute("aria-disabled");
+              removeImage.disabled = false;
+              actionButtons.forEach(button => button.disabled = false);
+              undoButton.disabled = undoButton.dataset.undoAvailable !== "true";
+              actionLinks.forEach(link => link.removeAttribute("aria-disabled"));
+              continueButton.textContent = "Continue story";
+            });
         }
         submitting = true;
         composer.setAttribute("aria-busy", "true");

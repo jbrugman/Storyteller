@@ -71,6 +71,31 @@ class SchemaInitializerTest {
     assertTrue(hasColumn(database, "STORY_MESSAGE", "IMAGE_CONTENT"));
   }
 
+  @Test
+  @DisplayName("""
+    Given an existing database without a streaming setting,
+    When schema initialization runs twice,
+    Then the new nullable column is added and existing validation choices are preserved
+    """)
+  void shouldMigrateGenerationSettings() throws Exception {
+    Database database = database();
+    var initializer = new SchemaInitializer(database);
+    initializer.initialize();
+    var now = java.time.Instant.now();
+    new JdbcSessionRepository(database).create(
+      new SessionRecord("session", "Story", now, now, now, now.plusSeconds(3600), false),
+      new SessionPrompts("System", "Fixed", "Rules"));
+    try (var connection = database.openConnection(); var statement = connection.createStatement()) {
+      statement.execute("UPDATE session_configuration SET validation_enabled = FALSE");
+      statement.execute("ALTER TABLE session_configuration DROP COLUMN streaming_enabled");
+    }
+    initializer.initialize();
+    initializer.initialize();
+    var loaded = new JdbcSessionSettingsRepository(database).load("session");
+    org.junit.jupiter.api.Assertions.assertNull(loaded.streamingEnabled());
+    assertEquals(Boolean.FALSE, loaded.validationEnabled());
+  }
+
   private Database database() {
     return new Database("jdbc:h2:file:" + temporaryDirectory.resolve("schema"), "sa", "");
   }

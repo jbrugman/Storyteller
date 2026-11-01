@@ -6,5 +6,7 @@ public record SessionConfigPatchRequest(
   JsonNode systemPrompt,
   JsonNode fixedProtagonists,
   JsonNode rules,
-  JsonNode temperature
+  JsonNode temperature,
+  JsonNode streamingEnabled,
+  JsonNode validationEnabled
 ) { }

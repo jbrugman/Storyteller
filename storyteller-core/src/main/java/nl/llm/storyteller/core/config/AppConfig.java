@@ -118,6 +118,9 @@ public final class AppConfig {
   }
 
   private void validateValidationOutputMode() {
+    if (streamingEnabled() && validationEnabled()) {
+      throw new IllegalArgumentException("streaming.enabled requires validation.enabled=false.");
+    }
     if (!"auto".equalsIgnoreCase(validationOutputMode())
       && !"text".equalsIgnoreCase(validationOutputMode())
       && !"json-schema".equalsIgnoreCase(validationOutputMode())) {
@@ -402,6 +405,10 @@ public final class AppConfig {
     return runtimeText.logModelUsage();
   }
 
+  public boolean streamingEnabled() {
+    return runtimeText.streamingEnabled();
+  }
+
   public boolean validationEnabled() {
     return runtimeText.validationEnabled();
   }
@@ -581,6 +588,7 @@ public final class AppConfig {
       ),
       new RuntimeTextConfig(
         source.requiredBoolean("validation.enabled"),
+        source.requiredBoolean("streaming.enabled"),
         source.requiredString("validation.outputMode"),
         source.requiredBoolean("response.hideReasoningBlocks"),
         source.requiredBoolean("logging.modelUsage"),
@@ -740,6 +748,7 @@ public final class AppConfig {
 
   private record RuntimeTextConfig(
     boolean validationEnabled,
+    boolean streamingEnabled,
     String validationOutputMode,
     boolean hideReasoningBlocks,
     boolean logModelUsage,
