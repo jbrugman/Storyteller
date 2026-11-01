@@ -21,6 +21,8 @@ export default function App() {
   const [prompt, setPrompt] = useState('');
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
+  const [streamText, setStreamText] = useState<string | null>(null);
+  const [streamPrompt, setStreamPrompt] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -57,6 +59,7 @@ export default function App() {
       // Keep the new ID even if loading history fails; do not accidentally recreate it.
       setSession(opened);
       setMessages([]);
+      setStreamText(null);
       setConfig(null);
       setState(null);
       setAtlas(null);
@@ -88,10 +91,28 @@ export default function App() {
   async function sendPrompt() {
     if (!session || !prompt.trim()) return;
     await run(async () => {
-      await api.turn(session.sessionId, prompt.trim());
+      setStreamText(null);
+      const settings = await api.config(session.sessionId);
+      if (settings.effectiveStreamingEnabled) {
+        setStreamPrompt(prompt.trim());
+        setStreamText('');
+        let receivedText = '';
+        try {
+          await api.streamTurn(session.sessionId, prompt.trim(), text => {
+            receivedText = text;
+            setStreamText(text);
+          });
+        } catch (cause) {
+          if (!receivedText.trim()) setStreamText(null);
+          throw cause;
+        }
+      } else {
+        await api.turn(session.sessionId, prompt.trim());
+      }
       setPrompt('');
       const history = await api.history(session.sessionId);
       setMessages(history.messages);
+      setStreamText(null);
     });
   }
 
@@ -102,6 +123,7 @@ export default function App() {
       await api.stopSession();
       setSession(null);
       setMessages([]);
+      setStreamText(null);
       setConfig(null);
       setState(null);
       setAtlas(null);
@@ -150,6 +172,7 @@ export default function App() {
       onResume={id => { void openSession(() => api.resumeSession(id)); }}
       onImport={file => { void openSession(() => api.importSession(file)); }} />}
     {page === 'story' && session && <StoryPage session={session} messages={messages} busy={busy}
+      streamText={streamText} streamPrompt={streamPrompt}
       prompt={prompt} onPromptChange={setPrompt} onSend={() => { void sendPrompt(); }}
       onSettings={() => { void openSettings(); }} onStop={() => { void stopStory(); }}
       onAtlas={() => { void openAtlas(); }} onInfinite={() => { void toggleInfinite(); }} onHistory={() => { void openHistory(); }} />}

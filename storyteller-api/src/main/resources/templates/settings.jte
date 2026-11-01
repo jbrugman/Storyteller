@@ -1,6 +1,8 @@
 @import nl.llm.storyteller.api.web.StorySettingsPage
 
 @param StorySettingsPage page
+@param boolean streamingEnabled = false
+@param boolean validationEnabled = true
 
 <!doctype html>
 <html lang="en">
@@ -70,6 +72,14 @@
                   aria-invalid="${page.hasKnowledgeGraphError()}"
                   aria-describedby="${page.hasKnowledgeGraphError() ? "knowledge-graph-error" : null}"
                   required>${page.knowledgeGraph()}</textarea>
+
+        <fieldset>
+          <legend>Response generation</legend>
+          <input type="hidden" name="generationSettings" value="true">
+          <label><input type="checkbox" id="streamingEnabled" name="streamingEnabled" checked="${streamingEnabled}"> Streaming</label>
+          <label><input type="checkbox" id="validationEnabled" name="validationEnabled" checked="${validationEnabled}"> Validation</label>
+          <p class="setting-hint">Streaming shows text while it is generated and requires validation to be off. Enabling either option turns the other off. Both may be off. Saved per session in the database.</p>
+        </fieldset>
 
         <fieldset class="temperature-fieldset">
           <label for="temperature">Chat temperature</label>
@@ -182,6 +192,10 @@
       });
     </script>
     <script>
+      const streaming = document.getElementById("streamingEnabled");
+      const validation = document.getElementById("validationEnabled");
+      streaming.addEventListener("change", () => { if (streaming.checked) validation.checked = false; });
+      validation.addEventListener("change", () => { if (validation.checked) streaming.checked = false; });
       const temperatureSlider = document.getElementById("temperature");
       const temperatureValue = document.getElementById("temperatureValue");
       if (temperatureSlider) {

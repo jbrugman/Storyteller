@@ -7,11 +7,28 @@ import java.util.Objects;
 public record SessionSettings(
   SessionPrompts prompts,
   KnowledgeGraphDocument knowledgeGraph,
-  Double temperature
+  Double temperature,
+  Boolean streamingEnabled,
+  Boolean validationEnabled
 ) {
   public SessionSettings {
+    if (Boolean.TRUE.equals(streamingEnabled) && Boolean.TRUE.equals(validationEnabled)) {
+      throw new IllegalArgumentException("Streaming and validation cannot both be enabled.");
+    }
     Objects.requireNonNull(prompts, "prompts");
     Objects.requireNonNull(knowledgeGraph, "knowledgeGraph");
+  }
+
+  public boolean streamingEnabled(boolean defaultValue) {
+    return streamingEnabled != null ? streamingEnabled : defaultValue;
+  }
+
+  public boolean validationEnabled(boolean defaultValue) {
+    return validationEnabled != null ? validationEnabled : defaultValue;
+  }
+
+  public SessionSettings(SessionPrompts prompts, KnowledgeGraphDocument knowledgeGraph, Double temperature) {
+    this(prompts, knowledgeGraph, temperature, null, null);
   }
 
   public SessionSettings(SessionPrompts prompts, KnowledgeGraphDocument knowledgeGraph) {

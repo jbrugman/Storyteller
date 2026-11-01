@@ -157,7 +157,8 @@ public final class WebController {
     }
     cookieService.write(context, session.get().sessionId(), session.get().infinite());
     context.render("story.jte", Map.of(
-      "page", storyPage(session.get(), Integer.MAX_VALUE)
+      "page", storyPage(session.get(), Integer.MAX_VALUE),
+      "streamingEnabled", storyTurnService.streamingEnabled(session.get().sessionId())
     ));
   }
 
@@ -208,7 +209,9 @@ public final class WebController {
         effectiveTemperature(settings.temperature()),
         valueOrEmpty(context.queryParam("notificationTitle")),
         valueOrEmpty(context.queryParam("notificationMessage"))
-      )
+      ),
+      "streamingEnabled", settingsService.streamingEnabled(settings),
+      "validationEnabled", settingsService.validationEnabled(settings)
     ));
   }
 
@@ -423,10 +426,22 @@ public final class WebController {
       context.formParam("fixedProtagonists"),
       context.formParam("rules"),
       context.formParam("knowledgeGraph"),
-      temperature
+      temperature,
+      submittedStreaming(context, session.get().sessionId()),
+      submittedValidation(context, session.get().sessionId())
     );
     cookieService.write(context, session.get().sessionId(), session.get().infinite());
     context.redirect("/story", HttpStatus.SEE_OTHER);
+  }
+
+  private Boolean submittedStreaming(Context context, String sessionId) {
+    return context.formParam("generationSettings") != null ? Boolean.valueOf(context.formParam("streamingEnabled") != null)
+      : settingsService.load(sessionId).streamingEnabled();
+  }
+
+  private Boolean submittedValidation(Context context, String sessionId) {
+    return context.formParam("generationSettings") != null ? Boolean.valueOf(context.formParam("validationEnabled") != null)
+      : settingsService.load(sessionId).validationEnabled();
   }
 
   private Double parseTemperature(String value) {
@@ -459,14 +474,16 @@ public final class WebController {
       valueOrEmpty(systemPrompt), valueOrEmpty(fixedProtagonists), valueOrEmpty(rules)
     );
     try {
-      settingsService.save(session.sessionId(), systemPrompt, fixedProtagonists, rules, knowledgeGraph, temperature);
+      settingsService.save(session.sessionId(), systemPrompt, fixedProtagonists, rules, knowledgeGraph, temperature,
+        submittedStreaming(context, session.sessionId()), submittedValidation(context, session.sessionId()));
     } catch (InvalidFixedProtagonistsException ex) {
       context.render("settings.jte", Map.of("page", StorySettingsPage.invalidYaml(
         submittedPrompts,
         valueOrEmpty(knowledgeGraph),
         effectiveTemperature(temperature),
         ex
-      )));
+      ), "streamingEnabled", Boolean.TRUE.equals(submittedStreaming(context, session.sessionId())),
+        "validationEnabled", Boolean.TRUE.equals(submittedValidation(context, session.sessionId()))));
       return true;
     } catch (InvalidKnowledgeGraphException ex) {
       context.render("settings.jte", Map.of("page", StorySettingsPage.invalidKnowledgeGraph(
@@ -474,7 +491,8 @@ public final class WebController {
         valueOrEmpty(knowledgeGraph),
         effectiveTemperature(temperature),
         ex
-      )));
+      ), "streamingEnabled", Boolean.TRUE.equals(submittedStreaming(context, session.sessionId())),
+        "validationEnabled", Boolean.TRUE.equals(submittedValidation(context, session.sessionId()))));
       return true;
     }
     return false;

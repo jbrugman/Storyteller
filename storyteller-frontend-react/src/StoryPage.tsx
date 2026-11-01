@@ -5,6 +5,8 @@ interface Props {
   session: Session;
   messages: StoryMessage[];
   busy: boolean;
+  streamText: string | null;
+  streamPrompt: string;
   prompt: string;
   onPromptChange: (prompt: string) => void;
   onSend: () => void;
@@ -15,14 +17,14 @@ interface Props {
   onAtlas: () => void;
 }
 
-export default function StoryPage({ session, messages, busy, prompt, onPromptChange, onSend, onSettings, onStop, onInfinite, onHistory, onAtlas }: Props) {
+export default function StoryPage({ session, messages, busy, streamText, streamPrompt, prompt, onPromptChange, onSend, onSettings, onStop, onInfinite, onHistory, onAtlas }: Props) {
   const [single, setSingle] = useState(false);
   const [maximized, setMaximized] = useState(false);
   const conversation = useRef<HTMLElement>(null);
   useEffect(() => {
     const element = conversation.current;
     if (element) element.scrollTop = element.scrollHeight;
-  }, [messages]);
+  }, [messages, streamText]);
 
   // Pair by role and adjacent persisted indexes, keeping unmatched messages visible.
   const exchanges: { prompt?: StoryMessage; response?: StoryMessage }[] = [];
@@ -61,7 +63,7 @@ export default function StoryPage({ session, messages, busy, prompt, onPromptCha
           </span>
         </span>
       </div>
-      {exchanges.length === 0 && <div className="empty-state">
+      {exchanges.length === 0 && streamText === null && <div className="empty-state">
         <h2>Begin the story</h2>
         <p>Describe the opening scene or tell the storyteller what should happen next.</p>
       </div>}
@@ -76,6 +78,13 @@ export default function StoryPage({ session, messages, busy, prompt, onPromptCha
           <div className="message-content">{exchange.response?.content}</div>
         </div>
       </article>)}
+      {streamText !== null && <article className="exchange">
+        <div className="exchange-prompt message-content">{streamPrompt}</div>
+        <div className="exchange-response">
+          <p className="message-role" role={busy ? 'status' : 'alert'}>{busy ? 'Generating…' : 'Incomplete response — reload the story before retrying.'}</p>
+          <div className="message-content">{streamText}</div>
+        </div>
+      </article>}
     </section>
     <form className="composer" aria-busy={busy} onSubmit={event => { event.preventDefault(); onSend(); }}>
       <label htmlFor="prompt">What happens next?</label>

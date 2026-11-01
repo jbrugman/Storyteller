@@ -88,6 +88,17 @@ or selectable there. Configure model names explicitly to use `/v1/responses`. Em
 and leave model selection to the backend. This manual startup requirement does not apply to the managed
 `llama-server` and MLX backend types: Storyteller starts those configured services itself.
 
+## Streaming and validation
+
+Story responses can stream progressively in both web interfaces. Streaming is off by default.
+To change the server defaults, set these in your runtime `application.config`:
+
+```properties
+streaming.enabled=true
+# Streaming requires validation to be off.
+validation.enabled=false
+```
+
 ## Build
 
 Build and test every module from the project root:

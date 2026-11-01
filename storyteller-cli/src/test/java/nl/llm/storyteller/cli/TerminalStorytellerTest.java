@@ -110,6 +110,41 @@ class TerminalStorytellerTest {
     assertTrue(result.output().contains("Turn-based graph data reset: 0 entities and 0 facts removed"));
   }
 
+  @Test
+  @DisplayName("""
+    Given streaming enabled for the web interfaces and validation disabled in configuration,
+    When the CLI submits a story prompt,
+    Then it uses a normal model request and displays the complete answer once without failing
+    """)
+  void shouldKeepCliWorkingWhenStreamingIsEnabled() throws Exception {
+    var backend = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+    var request = new java.util.concurrent.atomic.AtomicReference<com.fasterxml.jackson.databind.JsonNode>();
+    backend.createContext("/v1/chat/completions", exchange -> {
+      request.set(nl.llm.storyteller.core.JsonSupport.OBJECT_MAPPER.readTree(exchange.getRequestBody()));
+      byte[] response = "{\"choices\":[{\"message\":{\"content\":\"Complete CLI answer\"}}]}"
+        .getBytes(StandardCharsets.UTF_8);
+      exchange.getResponseHeaders().set("Content-Type", "application/json");
+      exchange.sendResponseHeaders(200, response.length);
+      try (var output = exchange.getResponseBody()) { output.write(response); }
+    });
+    backend.start();
+    try {
+      var override = tempDir.resolve("streaming.config");
+      java.nio.file.Files.writeString(override,
+        "streaming.enabled=true\nvalidation.enabled=false\ngraph.enabled=false\nbackend.type=openai-compatible\n"
+          + "model.chat=\nbackend.http.url=http://127.0.0.1:" + backend.getAddress().getPort() + "/v1/chat/completions\n");
+      var config = nl.llm.storyteller.core.config.AppConfigLoader.load(tempDir, override);
+      try (var context = nl.llm.storyteller.core.ApplicationFactory.create(config)) {
+        TerminalResult result = runTerminal("Hello\n/exit\n", context);
+        assertTrue(result.output().contains("Complete CLI answer"));
+        org.junit.jupiter.api.Assertions.assertEquals(result.output().indexOf("Complete CLI answer"),
+          result.output().lastIndexOf("Complete CLI answer"));
+        org.junit.jupiter.api.Assertions.assertNotNull(request.get());
+        org.junit.jupiter.api.Assertions.assertFalse(request.get().path("stream").asBoolean());
+      }
+    } finally { backend.stop(0); }
+  }
+
   private TerminalResult runTerminal(String input) throws Exception {
     AppConfig config = TestAppConfigFactory.load(tempDir);
     return runTerminal(input, context(config, null, null));

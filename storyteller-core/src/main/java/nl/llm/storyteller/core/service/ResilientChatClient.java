@@ -23,6 +23,12 @@ public final class ResilientChatClient implements ChatClient {
   }
 
   @Override
+  public String stream(List<Message> messages, Map<String, Object> options, int timeoutSeconds,
+    java.util.function.Consumer<String> onText) throws IOException, InterruptedException {
+    return guard.execute(() -> delegate.stream(messages, options, timeoutSeconds, onText));
+  }
+
+  @Override
   public String chat(String purpose, List<Message> messages, Map<String, Object> options, int timeoutSeconds)
     throws IOException, InterruptedException {
     return guard.execute(() -> delegate.chat(purpose, messages, options, timeoutSeconds));

@@ -151,7 +151,8 @@ public final class ApiServer implements AutoCloseable {
     SessionManagementController sessionManagementController = new SessionManagementController(
       sessionService, cookieService, bundleService
     );
-    SessionSettingsService settingsService = new SessionSettingsService(settingsRepository, graphValidator);
+    SessionSettingsService settingsService = new SessionSettingsService(settingsRepository, graphValidator,
+      coreConfig.streamingEnabled(), coreConfig.validationEnabled());
     var atlasService = new SessionAtlasService(
       settingsService, PredicateCatalog.load(coreConfig.baseDir())
     );

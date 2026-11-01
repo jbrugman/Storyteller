@@ -33,7 +33,12 @@ public final class ResponseGuard {
 
   public String validate(String validationSystemPrompt, String validationRequest, String assistantResponse)
     throws InterruptedException {
-    if (!config.validationEnabled()) {
+    return validate(validationSystemPrompt, validationRequest, assistantResponse, config.validationEnabled());
+  }
+
+  public String validate(String validationSystemPrompt, String validationRequest, String assistantResponse,
+    boolean validationEnabled) throws InterruptedException {
+    if (!validationEnabled) {
       return responseSanitizer.sanitize(assistantResponse);
     }
 

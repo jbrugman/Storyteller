@@ -37,6 +37,7 @@ public final class StoryController {
 
   public void register(JavalinConfig config) {
     config.routes.post("/v1/sessions/{sessionId}/turns", this::createTurn);
+    config.routes.post("/v1/sessions/{sessionId}/turns/stream", this::createTurn);
     config.routes.post("/v1/sessions/{sessionId}/messages/{messageIndex}/edit", this::editAssistantMessage);
     config.routes.get("/v1/sessions/{sessionId}/images/{messageIndex}", this::image);
   }
@@ -75,6 +76,15 @@ public final class StoryController {
       if (request == null) {
         throw new IllegalArgumentException("Story turn must be a JSON object.");
       }
+    }
+    if (context.path().endsWith("/stream")) {
+      if (!storyTurnService.streamingEnabled(sessionId)) {
+        throw new IllegalArgumentException("Streaming is disabled for this session.");
+      }
+      StoryImage attached = image;
+      StoryStream.write(context, onText -> storyTurnService.execute(
+        sessionId, request.prompt(), attached, request.pastMessageIndexes(), onText));
+      return;
     }
     StoryTurnResult result = storyTurnService.execute(sessionId, request.prompt(), image, request.pastMessageIndexes());
     context.json(new StoryTurnResponse(

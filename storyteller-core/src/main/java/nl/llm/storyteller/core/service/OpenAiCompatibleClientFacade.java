@@ -122,6 +122,44 @@ public final class OpenAiCompatibleClientFacade implements ChatClient {
     return stripReasoningBlocks(result.content());
   }
 
+  @Override
+  public String stream(List<Message> messages, Map<String, Object> options, int timeoutSeconds,
+    java.util.function.Consumer<String> onText) throws IOException, InterruptedException {
+    long started = System.nanoTime();
+    StringBuilder accumulated = new StringBuilder();
+    java.util.function.Consumer<String> delta = part -> {
+      accumulated.append(part);
+      String visible = accumulated.toString();
+      if (hideReasoningBlocks) {
+        // Hold an unfinished tag so a reasoning marker split across chunks cannot leak.
+        int open = visible.lastIndexOf('<');
+        if (open > visible.lastIndexOf('>')) visible = visible.substring(0, open);
+        visible = stripReasoningBlocks(visible);
+      }
+      onText.accept(visible);
+    };
+    Map<String, Object> backendOptions = backendOptions(options);
+    OpenAiRouteResult result;
+    if (!preferResponses || responsesSupport.get() == ResponsesCapabilityCache.Support.UNSUPPORTED) {
+      result = chatCompletions.stream(messages, backendOptions, timeoutSeconds, delta);
+    } else {
+      try {
+        result = responses.stream(messages, backendOptions, timeoutSeconds, delta);
+        responsesSupport.set(ResponsesCapabilityCache.Support.SUPPORTED);
+      } catch (UnsupportedResponsesEndpointException ex) {
+        responsesSupport.set(ResponsesCapabilityCache.Support.UNSUPPORTED);
+        result = chatCompletions.stream(messages, backendOptions, timeoutSeconds, delta);
+      }
+    }
+    metrics.recordRequest(metricsPurpose, result.outputTokens(), Duration.ofNanos(System.nanoTime() - started));
+    if (logModelUsage) {
+      LOGGER.log(System.Logger.Level.INFO, "Model usage: purpose=" + metricsPurpose
+        + ", outputTokens=" + tokenCount(result.outputTokens())
+        + ", thinkingTokens=" + tokenCount(result.reasoningTokens()));
+    }
+    return stripReasoningBlocks(result.content());
+  }
+
   private static String tokenCount(long tokens) {
     return tokens < 0 ? "unavailable" : Long.toString(tokens);
   }

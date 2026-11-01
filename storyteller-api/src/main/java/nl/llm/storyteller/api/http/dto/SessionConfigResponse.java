@@ -6,5 +6,9 @@ public record SessionConfigResponse(
   String fixedProtagonists,
   String rules,
   Double temperature,
-  Double effectiveTemperature
+  Double effectiveTemperature,
+  Boolean streamingEnabled,
+  Boolean validationEnabled,
+  boolean effectiveStreamingEnabled,
+  boolean effectiveValidationEnabled
 ) { }

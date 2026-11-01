@@ -70,4 +70,35 @@ class JdbcSessionSettingsRepositoryTest {
     assertEquals(updated, repository.load("session-id"));
     assertEquals("Generated canonical state", memoryRepository.load("session-id").canonicalState());
   }
+
+  @Test
+  @DisplayName("""
+    Given session generation choices saved in a file database,
+    When another repository opens the database and patches unrelated settings,
+    Then streaming and validation choices remain persisted and isolated per session
+    """)
+  void shouldPersistGenerationAcrossRepositoryReload() {
+    String url = "jdbc:h2:file:" + temporaryDirectory.resolve("generation");
+    Database database = new Database(url, "sa", "");
+    new SchemaInitializer(database).initialize();
+    Instant now = Instant.now();
+    var sessions = new JdbcSessionRepository(database);
+    for (String id : java.util.List.of("first", "second")) {
+      sessions.create(new SessionRecord(id, "Story", now, now, now, now.plusSeconds(3600), false),
+        new SessionPrompts("System", "Fixed", "Rules"));
+    }
+    var repository = new JdbcSessionSettingsRepository(database);
+    repository.patchConfiguration("first", java.util.Map.of(), false, null, true, true, false);
+
+    var reloaded = new JdbcSessionSettingsRepository(new Database(url, "sa", ""));
+    reloaded.patchConfiguration("first", java.util.Map.of(), true, 0.2);
+
+    assertEquals(Boolean.TRUE, reloaded.load("first").streamingEnabled());
+    assertEquals(Boolean.FALSE, reloaded.load("first").validationEnabled());
+    org.junit.jupiter.api.Assertions.assertNull(reloaded.load("second").streamingEnabled());
+    org.junit.jupiter.api.Assertions.assertNull(reloaded.load("second").validationEnabled());
+    assertThrows(IllegalArgumentException.class, () -> reloaded.patchConfiguration(
+      "first", java.util.Map.of(), false, null, true, true, true));
+    assertEquals(Boolean.FALSE, reloaded.load("first").validationEnabled());
+  }
 }
