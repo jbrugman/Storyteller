@@ -171,34 +171,41 @@ public final class SessionBundleService {
   }
 
   private Map<String, byte[]> readEntries(InputStream input) throws IOException {
-    Map<String, byte[]> entries = new HashMap<>();
+    List<RawEntry> rawEntries = new ArrayList<>();
     long totalBytes = 0;
     try (ZipInputStream zip = new ZipInputStream(input, StandardCharsets.UTF_8)) {
       ZipEntry entry;
       while ((entry = zip.getNextEntry()) != null) {
-        String name = normalizedEntryName(entry);
-        if (name == null) {
+        if (entry.isDirectory()) {
           zip.closeEntry();
           continue;
         }
-        validateEntry(entry, name, entries);
         byte[] content = readEntry(zip, MAX_UNCOMPRESSED_BYTES - totalBytes);
         totalBytes += content.length;
-        entries.put(name, content);
+        rawEntries.add(new RawEntry(entry.getName(), content));
         zip.closeEntry();
       }
+    }
+    String wrapper = wrapperPrefix(rawEntries);
+    Map<String, byte[]> entries = new HashMap<>();
+    for (RawEntry raw : rawEntries) {
+      String name = normalizedEntryName(raw, wrapper);
+      if (name == null) {
+        continue;
+      }
+      validateEntry(name, entries);
+      entries.put(name, raw.content());
     }
     return entries;
   }
 
-  private String normalizedEntryName(ZipEntry entry) {
-    String name = entry.getName();
+  private String normalizedEntryName(RawEntry raw, String wrapper) {
+    String name = raw.name();
     if (name.startsWith(MACOS_METADATA_DIRECTORY)) {
       return null;
     }
-    if (entry.isDirectory() && (MEMORY_DIRECTORY.equals(name) || IMAGE_DIRECTORY.equals(name)
-      || SYSTEM_PROMPTS_DIRECTORY.equals(name))) {
-      return null;
+    if (name.startsWith(wrapper)) {
+      name = name.substring(wrapper.length());
     }
     if (name.startsWith(MEMORY_DIRECTORY) && !name.startsWith(IMAGE_DIRECTORY)) {
       name = name.substring(MEMORY_DIRECTORY.length());
@@ -209,13 +216,37 @@ public final class SessionBundleService {
     boolean promptEntry = name.startsWith(SYSTEM_PROMPTS_DIRECTORY);
     if (name.isBlank() || name.contains("\\") || name.contains("..")
       || (name.contains("/") && !promptEntry && isNotImageEntry(name))) {
-      throw new IllegalArgumentException("Unsafe session ZIP entry: " + entry.getName());
+      throw new IllegalArgumentException("Unsafe session ZIP entry: " + raw.name());
     }
     return name;
   }
 
-  private void validateEntry(ZipEntry entry, String name, Map<String, byte[]> entries) {
-    if (entry.isDirectory() || (!ALLOWED_ENTRIES.contains(name) && isNotImageEntry(name))) {
+  private String wrapperPrefix(List<RawEntry> entries) {
+    String prefix = null;
+    for (RawEntry entry : entries) {
+      String name = entry.name();
+      if (name.startsWith(MACOS_METADATA_DIRECTORY)) {
+        continue;
+      }
+      int separator = name.indexOf('/');
+      if (name.startsWith("/") || separator < 0) {
+        return "";
+      }
+      String root = name.substring(0, separator + 1);
+      if (prefix == null) {
+        prefix = root;
+      } else if (!prefix.equals(root)) {
+        return "";
+      }
+    }
+    if (prefix == null || MEMORY_DIRECTORY.equals(prefix) || SYSTEM_PROMPTS_DIRECTORY.equals(prefix)) {
+      return "";
+    }
+    return prefix;
+  }
+
+  private void validateEntry(String name, Map<String, byte[]> entries) {
+    if (!ALLOWED_ENTRIES.contains(name) && isNotImageEntry(name)) {
       throw new IllegalArgumentException("Unsupported session ZIP entry: " + name);
     }
     if (entries.containsKey(name)) {
@@ -562,6 +593,8 @@ public final class SessionBundleService {
     }
     return title.length() <= MAX_NAME_LENGTH ? title : title.substring(0, MAX_NAME_LENGTH);
   }
+
+  private record RawEntry(String name, byte[] content) { }
 
   private record ParsedBundle(SessionBundle bundle, String title) { }
 }
