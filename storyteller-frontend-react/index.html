@@ -4,6 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Storyteller · React example</title>
+    <!-- Apply the saved theme before the first paint so the page never flashes the default palette.
+         This mirrors the blocking head script in the bundled interface; the React code only updates it on change. -->
+    <script>
+      (() => {
+        const cookieName = "storyteller_theme";
+        const validTheme = value => value === "dark-sci-fi" || value === "nature" || value === "ocean"
+          || value === "passion" || value === "summer" || value === "evening" ? value : "default";
+        let theme = "default";
+        try {
+          const value = document.cookie.split(";").map(cookie => cookie.trim())
+            .find(cookie => cookie.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1);
+          theme = validTheme(value);
+        } catch (_) {
+          // Cookie access can be blocked; the default theme still works.
+        }
+        document.documentElement.dataset.theme = theme;
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

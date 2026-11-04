@@ -24,7 +24,7 @@ export default function HistoryPage({ state, busy, onReset, onBack }: Props) {
       <label htmlFor="canonicalState">Canonical state · processed messages: {state.canonicalStateCursor}</label>
       <textarea id="canonicalState" rows={16} readOnly value={state.canonicalState}
         placeholder="No canonical state has been generated yet." />
-      <div className="memory-actions" aria-label="Memory reset actions">
+      <div className="memory-actions" role="group" aria-label="Memory reset actions">
         <span>Memory reset</span>
         <button className="compact-button danger-button" disabled={busy} onClick={() => onReset('mid-term')}>Reset mid-term</button>
         <button className="compact-button danger-button" disabled={busy} onClick={() => onReset('long-term')}>Reset long-term</button>

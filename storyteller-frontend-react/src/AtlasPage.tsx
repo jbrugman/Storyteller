@@ -34,7 +34,7 @@ export default function AtlasPage({ atlas, busy, onRefresh, onBack }: Props) {
     return <ul className="atlas-facts">{relations.map(relation => <li key={relation.id}>
       <p>{relation.text}</p>
       <p className="setting-hint">{relation.status} · Source: {relation.source}</p>
-      <div className="atlas-connections" aria-label="Connected entries">
+      <div className="atlas-connections" role="group" aria-label="Connected entries">
         {[...new Set([relation.subjectId, relation.objectId])].map(id => <a key={id}
           href={`#atlas-${encodeURIComponent(id)}`} onClick={event => { event.preventDefault(); follow(id); }}>
           {atlas.entries.find(entry => entry.id === id)?.name ?? id}

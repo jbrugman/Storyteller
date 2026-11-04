@@ -23,7 +23,7 @@ npm ci
 npm run dev
 ```
 
-Open http://localhost:5173. Vite proxies `/v1` to `http://localhost:7070`, so browser requests and the session cookie use the frontend origin. 
+Open http://localhost:5173. Vite proxies `/v1` to `http://localhost:7090`, so browser requests and the session cookie use the frontend origin. 
 No backend CORS changes are needed. If the backend uses another address, change `server.proxy` in `vite.config.ts`.
 
 The backend needs its normal model and database configuration; this example does not contain a mock model. 
@@ -32,39 +32,47 @@ Sending a prompt invokes the configured model.
 ## What to try
 
 1. Start a session with an optional title, resume an infinite session by ID, or import a CLI session ZIP.
-2. Send a prompt and read the persisted history.
+2. Send a prompt and read the persisted history. In a long story, scroll to the top of the conversation to page in older exchanges ten messages at a time, mirroring the bundled interface.
 3. Open Settings to edit the system prompt, protagonists YAML, rules, and temperature slider (0–2). Save to apply them to the next turn.
 4. Select “Use server default” and save to restore the default temperature.
-5. In Settings, choose Default, Ski-fi, Nature, Ocean, Passion, Summer, or Evening. Themes apply immediately across all screens, independently of Save settings. A separate `storyteller_theme` cookie remembers the choice for one year; stopping a story does not clear it. Missing or unknown values use Default. If cookies are blocked, the choice lasts for the current visit.
+5. In Settings, choose Default, Sci-fi, Nature, Ocean, Passion, Summer, or Evening. Themes apply immediately across all screens, independently of Save settings. A separate `storyteller_theme` cookie remembers the choice for one year; stopping a story does not clear it. Missing or unknown values use Default. If cookies are blocked, the choice lasts for the current visit.
 6. Open Atlas to read Fixed protagonists profiles alongside graph facts, search by name or alias, switch between characters, locations, items, and skills, and follow relationships. Changing category immediately replaces the list and details and clears the search. Refresh reloads the persisted graph; updates can lag behind recent turns.
-7. Reload the page: `GET /v1/session` restores the session through its cookie.
+7. Continue an active story: attach or paste a PNG/JPEG image with a prompt, undo the last exchange, edit a saved response, or use Export to download the session. Tick up to three older exchanges labelled “Use as past context” (tracked by the `n/3 past exchanges` counter) to send them into the next turn's context.
+8. In Settings, edit the knowledge graph JSON directly or use the graph tools (Generate empty, Fill from protagonists, Reset turn-based). A dialog warns before replacing data that already exists.
+9. Reload the page: `GET /v1/session` restores the session through its cookie.
 
 Starting, resuming, or importing a session switches the active cookie; it does not delete the previous session.
 “Infinite” preserves the session for later resume and displays its resume ID; “Use timeout” restores finite lifetime.
 “Stop story” clears the active session cookie and returns to the start screen. Finite sessions are permanently deleted after confirmation; infinite sessions remain stored and can be resumed by ID.
 “History” shows mid-term and long-term summaries and canonical state with processed-message counts. Each reset button clears only its corresponding memory layer, then reloads the stored state. Derived memory updates run asynchronously, so the displayed data can lag behind story turns. Only infinite sessions can be resumed by ID; this matches the bundled web interface.
 The proxy does not share cookies already stored for a different hostname: use `localhost` consistently.
+When a session expires or is stopped during any action, the interface returns to the start screen rather than only at load time.
 
 ## Where to look
 
 | File | Responsibility |
 | --- | --- |
 | `src/api.ts` | Typed API calls, JSON request bodies, and API errors using ordinary `fetch`. |
+| `src/session-errors.ts` | Maps every API failure to one of four outcomes, so an expired session is handled in any action, not only at startup. |
+| `src/turn-submission.ts` | Streams or posts a single turn and refreshes history, isolated so its completion rules are testable without React. |
+| `src/story-exchanges.ts` | Pairs saved prompt and response messages into exchanges. |
+| `src/images.ts` | Validates and downscales an image prompt before it is uploaded. |
+| `src/knowledge-graph.ts` | Reads and formats the knowledge graph JSON and decides when a graph tool should warn first. |
 | `src/App.tsx` | Active session, screen selection, API operations, and shared loading/error handling. |
 | `src/StartPage.tsx` | Create, resume, and ZIP import forms. |
-| `src/StoryPage.tsx` | Paired prompt/response history, composer, and layout toggles. |
-| `src/SettingsPage.tsx` | Theme selector, prompt settings, and temperature slider. |
+| `src/StoryPage.tsx` | Paired prompt/response history, image prompts, response editing, undo, export, and layout toggles. |
+| `src/SettingsPage.tsx` | Theme selector, prompt settings, temperature slider, knowledge-graph editing, and graph tools. |
 | `src/theme.ts` | Theme preference cookie and document theme attribute. |
 | `src/AtlasPage.tsx` | Read-only searchable story atlas using the shared atlas API and existing theme colors. |
 | `src/HistoryPage.tsx` | Read-only memory layers, cursors, and reset buttons. |
 | `src/main.tsx` | Mount the application into the HTML root element. |
 | `src/style.css` | Layout and component rules, plus small React notice/default-control additions; imports the theme files. |
-| `src/themes/*.css` | Default color palette and the Ski-fi, Nature, Ocean, Passion, Summer, and Evening overrides, selected by `data-theme`. |
+| `src/themes/*.css` | Default color palette and the Sci-fi, Nature, Ocean, Passion, Summer, and Evening overrides, selected by `data-theme`. |
 | `vite.config.ts` | React build tooling and the local API proxy. |
 
-The example follows the start, story, and settings layouts of the bundled JTE web interface. It calls create/current/resume/stop session, lifetime PATCH, ZIP import, history, state/memory resets, config GET/PATCH, and turns. For request/response contracts and additional endpoints, read [the API design](../docs/api_design.md#implemented-json-api). Image controls, graph editing, undo, response editing, and export are left for extensions.
+The example follows the start, story, and settings layouts of the bundled JTE web interface. It calls create/current/resume/stop session, lifetime PATCH, ZIP import, history, state/memory resets, config GET/PATCH, turns, undo, message edit, images, export, and the graph endpoints. For request/response contracts and additional endpoints, read [the API design](../docs/api_design.md#implemented-json-api). It now also matches the bundled interface for image prompts (pick, paste, preview, and lightbox), undo, response editing, export, editing the knowledge graph and its graph tools, the model-unavailable dialog, the per-turn “use as past context” selection, the header action order and right-aligned composer buttons, and applying the saved theme before first paint.
 
-The copied stylesheet keeps the example self-contained; later styling changes in the Java module are not automatically synchronized. React components use the same CSS class names, but do not execute the JTE templates or their scripts. Screen selection uses local React state, so there are no separate browser routes.
+The copied stylesheet keeps the example self-contained; later styling changes in the Java module are not automatically synchronized. React components use the same CSS class names, but do not execute the JTE templates or their scripts. Screen selection uses local React state, so there are no separate browser routes. Remaining differences are deliberate because the current JSON API does not expose the needed detail: graph tools report success without the JTE revision/fact/entity counts, and settings errors are shown globally rather than per field.
 
 ## React concepts from an Angular perspective
 
@@ -89,6 +97,12 @@ This checks TypeScript and creates `dist/`. This example is separate from Maven;
 `npm run preview` previews the built assets, but does not provide the development API proxy.
 For a deployed build, serve `dist/` and reverse-proxy `/v1` on the same origin, or use your own backend. 
 Opening `dist/index.html` directly is not a deployment.
+
+The tests under `tests/` run the real TypeScript sources through Node's built-in test runner, so a failing test means production behaviour broke:
+
+```sh
+node --test tests/*.test.mjs
+```
 
 This is an API learning example, not a complete replacement for the bundled web UI. 
 A session ID grants access to that session; the current API has no user-account authorization layer. 

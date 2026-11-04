@@ -23,6 +23,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SessionDataApiTest {
@@ -91,6 +92,62 @@ class SessionDataApiTest {
     assertEquals(2, remaining.size());
     assertEquals("First", remaining.get(0).path("content").asText());
     assertEquals(requestsBeforeRead, modelRequests.get());
+  }
+
+  @Test
+  @DisplayName("Given exchanges outside the recent window, when history is read and a turn references them, then only eligible exchanges are accepted")
+  void shouldExposeReferenceWindowAndGuardReferencedPastExchanges() throws Exception {
+    // A recent window of one turn leaves the first exchange (messageIndex 0) outside it, so it becomes referenceable.
+    startSession("chat.maxRecentTurns=1\n");
+    assertEquals(200, request("POST", "/turns", "{\"prompt\":\"First\"}").statusCode());
+    assertEquals(200, request("POST", "/turns", "{\"prompt\":\"Second\"}").statusCode());
+
+    JsonNode history = json(request("GET", "/history", null));
+    assertEquals(4, history.path("messages").size());
+    // referenceBefore is an exclusive cutoff: lastMessageIndex 3 + 1 - maxRecentTurns(1) * 2 == 2.
+    assertEquals(2, history.path("referenceBeforeMessageIndex").asInt());
+
+    // Guard checks run before a successful reference so the accepted turn cannot shift the window out from under them.
+    // A message inside the recent window (messageIndex 2 >= referenceBefore) must be rejected.
+    HttpResponse<String> insideWindow = request("POST", "/turns", "{\"prompt\":\"Third\",\"pastMessageIndexes\":[2]}");
+    assertEquals(400, insideWindow.statusCode());
+    assertEquals("invalid_request", json(insideWindow).path("code").asText());
+    assertTrue(json(insideWindow).path("message").asText().contains("Only exchanges outside the recent story context"));
+    // Selecting more than three past exchanges must be rejected before any other validation.
+    HttpResponse<String> tooMany = request("POST", "/turns", "{\"prompt\":\"Fourth\",\"pastMessageIndexes\":[0,1,2,3]}");
+    assertEquals(400, tooMany.statusCode());
+    assertTrue(json(tooMany).path("message").asText().contains("Select at most three past exchanges"));
+    // The first exchange (messageIndex 0) is outside the recent window and may be referenced.
+    assertEquals(200, request("POST", "/turns", "{\"prompt\":\"Fifth\",\"pastMessageIndexes\":[0]}").statusCode());
+  }
+
+  @Test
+  @DisplayName("Given more persisted turns than one page, when history is read with a limit and an older cursor, then it pages and reports whether older history remains")
+  void shouldPageOlderHistoryAndReportHasOlder() throws Exception {
+    startSession();
+    for (String prompt : List.of("First", "Second", "Third", "Fourth")) {
+      assertEquals(200, request("POST", "/turns", "{\"prompt\":\"" + prompt + "\"}").statusCode());
+    }
+    // Eight messages exist; the most recent page of four still leaves older messages behind.
+    JsonNode recent = json(request("GET", "/history?limit=4", null));
+    assertEquals(4, recent.path("messages").size());
+    assertEquals(4, recent.path("messages").get(0).path("messageIndex").asInt(), "The read returns the newest window oldest-first");
+    assertTrue(recent.path("hasOlder").asBoolean(), "Messages before the window still exist");
+    // Paging before the oldest loaded message reaches the first message, so older history then ends.
+    JsonNode oldest = json(request("GET", "/history?limit=4&before=4", null));
+    assertEquals(4, oldest.path("messages").size());
+    assertEquals(0, oldest.path("messages").get(0).path("messageIndex").asInt());
+    assertFalse(oldest.path("hasOlder").asBoolean(), "The first message is loaded, so no older history remains");
+    // A full read without a limit always reports having everything.
+    assertFalse(json(request("GET", "/history", null)).path("hasOlder").asBoolean());
+  }
+
+  @Test
+  @DisplayName("Given a non-positive history page parameter, when history is read, then the request is rejected as invalid")
+  void shouldRejectInvalidHistoryPageParameters() throws Exception {
+    startSession();
+    assertEquals(400, request("GET", "/history?before=0", null).statusCode());
+    assertEquals(400, request("GET", "/history?limit=-1", null).statusCode());
   }
 
   @Test
@@ -178,8 +235,13 @@ class SessionDataApiTest {
   }
 
   private void startSession() throws Exception {
+    startSession("");
+  }
+
+  private void startSession(String extraCoreConfig) throws Exception {
     Path coreOverride = temporaryDirectory.resolve("core.config");
-    Files.writeString(coreOverride, "validation.enabled=false\ngraph.enabled=false\nchat.temperature=0.85\n");
+    Files.writeString(coreOverride,
+      "validation.enabled=false\ngraph.enabled=false\nchat.temperature=0.85\n" + extraCoreConfig);
     config = new ApiConfig("127.0.0.1", 0, temporaryDirectory.resolve("database/api"), "sa", "", Duration.ofMinutes(60));
     ChatClient model = (messages, options, timeout) -> {
       modelRequests.incrementAndGet();

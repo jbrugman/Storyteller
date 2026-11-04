@@ -599,6 +599,16 @@ Not yet.
 ```
 
 ## Changelog
+### 2.1.6
+- Aligned the React front-end example with the built-in JTE web interface: 
+  image prompts (pick, paste, preview, and lightbox), undo, response editing, export, knowledge-graph editing with its graph tools, and the model-unavailable dialog.
+- Applied the saved theme before the first paint so the page no longer flashes the default palette, and corrected the Sci-fi theme label spelling.
+- Handle an expired or stopped session from any action rather than only at start-up, by mapping every API failure to a single outcome.
+- Exposed `referenceBeforeMessageIndex` on the session history endpoint so clients can gate the per-turn “use as past context” selection exactly like the bundled interface.
+- Added focused tests that run the real React front-end sources, replacing a brittle test that re-evaluated extracted component code.
+- Ported the built-in interface's older-history pagination to the React example: the session-history endpoint now accepts 
+  a `before` cursor and `limit` and reports `hasOlder`, so a long story pages in older exchanges on scroll instead of loading its whole history into the DOM at once.
+
 ### 2.1.5
 - Added the option to enable or disable the validation option in the configuration-page in the web interface. (streaming is disabled)
 - Added the option to enable or disable the streaming option in the configuration-page in the web interface. (validation is disabled)
