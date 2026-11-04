@@ -31,7 +31,7 @@ class ApiConfigLoadingTest {
     ApiConfig config = ApiConfigLoader.load(temporaryDirectory, null);
 
     assertEquals(key, config.databaseEncryptionKey());
-    assertEquals(7070, config.port());
+    assertEquals(7090, config.port());
     assertEquals(temporaryDirectory.resolve("memory/storyteller-api"), config.databasePath());
     assertEquals(false, config.mysql().enabled());
   }
@@ -97,7 +97,7 @@ class ApiConfigLoadingTest {
     ApiConfig apiConfig = ApiConfigLoader.load(temporaryDirectory, null);
 
     assertEquals("0.0.0.0", apiConfig.host());
-    assertEquals(7070, apiConfig.port());
+    assertEquals(7090, apiConfig.port());
     assertEquals(temporaryDirectory.resolve("memory/storyteller-api"), apiConfig.databasePath());
     assertEquals("sa", apiConfig.databaseUsername());
     assertEquals("", apiConfig.databasePassword());

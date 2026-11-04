@@ -64,7 +64,7 @@ Current settings include:
 - `api.tls.directory`
 - `api.tls.subjectAlternativeNames`
 
-The default HTTP listener uses port `7070`. When TLS is enabled, HTTPS uses port `7443`; both connectors belong to the same API application. The generated local certificate authority is available at `GET /storyteller-ca.crt`. Session cookies are marked `Secure` when TLS is enabled.
+The default HTTP listener uses port `7090`. When TLS is enabled, HTTPS uses port `7443`; both connectors belong to the same API application. The generated local certificate authority is available at `GET /storyteller-ca.crt`. Session cookies are marked `Secure` when TLS is enabled.
 
 ### Packaging
 

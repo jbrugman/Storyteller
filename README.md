@@ -159,7 +159,7 @@ mvn -pl storyteller-api -am exec:java \
 
 By default, the server listens on:
 
-- `http://localhost:7070`
+- `http://localhost:7090`
 - `https://localhost:7443`
 
 Open either address in a browser to use the bundled web interface. HTTPS uses a locally generated certificate authority;

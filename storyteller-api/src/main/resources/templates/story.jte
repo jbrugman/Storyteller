@@ -47,7 +47,7 @@
         </div>
       </header>
 
-      <section id="conversation" class="conversation" aria-live="polite"
+      <section id="conversation" class="conversation"
                data-has-older="${page.hasOlder()}">
         <div class="conversation-heading">
           <span>Prompt</span>

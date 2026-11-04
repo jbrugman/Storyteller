@@ -24,6 +24,7 @@ import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -99,6 +100,69 @@ class SessionBundleServiceTest {
     assertEquals(defaultPrompts(), repository.importedBundle.prompts());
   }
 
+  @Test
+  @DisplayName("""
+    Given a session folder that Finder compressed with its own wrapper folder and metadata,
+    When the session is imported,
+    Then the wrapper folder should be unwrapped and every bundle file should be read
+    """)
+  void shouldImportBundleWrappedInFinderFolder() throws Exception {
+    RecordingRepository repository = new RecordingRepository(null);
+    SessionBundleService service = service(repository);
+    byte[] archive = archiveInsideFinderFolder();
+
+    service.importArchive(new ByteArrayInputStream(archive), archive.length, "story-session-finder.zip");
+
+    assertEquals(2, repository.importedBundle.history().messages().size());
+    assertEquals("Finder rules", repository.importedBundle.prompts().rules());
+    assertEquals("Default system", repository.importedBundle.prompts().systemPrompt());
+  }
+
+  @Test
+  @DisplayName("""
+    Given a compressed session folder containing an entry that escapes that folder,
+    When the session is imported,
+    Then the entry should still be rejected as unsafe
+    """)
+  void shouldRejectEscapingEntryInsideWrappedFolder() throws Exception {
+    SessionBundleService service = service(new RecordingRepository(null));
+    ByteArrayOutputStream output = new ByteArrayOutputStream();
+    try (ZipOutputStream zip = new ZipOutputStream(output, StandardCharsets.UTF_8)) {
+      writeEntry(zip, "story-session-finder/history.json", """
+        {"messages":[
+          {"role":"user","content":"Begin"},
+          {"role":"assistant","content":"Started"}
+        ]}
+        """);
+      writeEntry(zip, "story-session-finder/../escape.json", "escape attempt");
+    }
+    byte[] archive = output.toByteArray();
+
+    IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+      () -> service.importArchive(new ByteArrayInputStream(archive), archive.length, "wrapped.zip"));
+    assertEquals("Unsafe session ZIP entry: story-session-finder/../escape.json", error.getMessage());
+  }
+
+  private byte[] archiveInsideFinderFolder() throws Exception {
+    ByteArrayOutputStream output = new ByteArrayOutputStream();
+    try (ZipOutputStream zip = new ZipOutputStream(output, StandardCharsets.UTF_8)) {
+      writeDirectory(zip, "story-session-finder/");
+      writeEntry(zip, "story-session-finder/history.json", """
+        {"messages":[
+          {"role":"user","content":"Begin"},
+          {"role":"assistant","content":"Started"}
+        ]}
+        """);
+      writeDirectory(zip, "story-session-finder/systemprompts/");
+      writeEntry(zip, "story-session-finder/systemprompts/rules.md", "Finder rules");
+      writeEntry(zip, "story-session-finder/.DS_Store", "finder metadata");
+      writeEntry(zip, "story-session-finder/._history.json", "finder metadata");
+      writeEntry(zip, "__MACOSX/._story-session-finder", "finder metadata");
+      writeEntry(zip, "__MACOSX/story-session-finder/._history.json", "finder metadata");
+    }
+    return output.toByteArray();
+  }
+
   private byte[] archiveWithMacOsMetadata() throws Exception {
     ByteArrayOutputStream output = new ByteArrayOutputStream();
     try (ZipOutputStream zip = new ZipOutputStream(output, StandardCharsets.UTF_8)) {
@@ -112,6 +176,11 @@ class SessionBundleServiceTest {
       writeEntry(zip, ".DS_Store", "finder metadata");
     }
     return output.toByteArray();
+  }
+
+  private void writeDirectory(ZipOutputStream zip, String name) throws Exception {
+    zip.putNextEntry(new ZipEntry(name));
+    zip.closeEntry();
   }
 
   private void writeEntry(ZipOutputStream zip, String name, String content) throws Exception {

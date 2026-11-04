@@ -15,6 +15,21 @@ export interface StoryMessage {
   hasImage: boolean;
 }
 
+// The exclusive cutoff for "use as past context": only exchanges with a lower messageIndex can be referenced.
+// hasOlder reports whether older pages remain, so the conversation can page back through a long story.
+export interface SessionHistory {
+  sessionId: string;
+  messages: StoryMessage[];
+  referenceBeforeMessageIndex: number;
+  hasOlder: boolean;
+}
+
+// Optional window for the session history endpoint, mirroring the bundled interface's message-index cursor.
+export interface HistoryPage {
+  before?: number;
+  limit?: number;
+}
+
 export interface SessionConfig {
   sessionId: string;
   systemPrompt: string;
@@ -34,6 +49,14 @@ export class ApiError extends Error {
   }
 }
 
+// The backend serves the graph as a JSON document; the settings editor works with the same document as text.
+export type KnowledgeGraph = Record<string, unknown>;
+
+export interface SessionGraph {
+  sessionId: string;
+  knowledgeGraph: KnowledgeGraph;
+}
+
 export interface SessionState {
   sessionId: string;
   summary: string;
@@ -42,7 +65,7 @@ export interface SessionState {
   summaryCursor: number;
   recentSummaryCursor: number;
   canonicalStateCursor: number;
-  knowledgeGraph: unknown;
+  knowledgeGraph: KnowledgeGraph;
 }
 
 export interface AtlasRelation {
@@ -82,24 +105,61 @@ export interface SessionAtlas {
 
 export type MemoryLayer = 'mid-term' | 'long-term' | 'canonical-state';
 
+export interface TurnOptions {
+  image?: File;
+  signal?: AbortSignal;
+  pastMessageIndexes?: number[];
+}
+
 // Relative URLs work through Vite's development proxy or a same-origin deployment.
-async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+// A string body is sent unchanged so raw JSON, such as a knowledge graph, is not encoded twice.
+async function request<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
+  const json = body !== undefined && !(body instanceof FormData);
   const response = await fetch(`/v1${path}`, {
     method,
     credentials: 'same-origin',
-    headers: body === undefined || body instanceof FormData ? undefined : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body),
+    signal,
+    headers: json ? { 'Content-Type': 'application/json' } : undefined,
+    body: body === undefined ? undefined
+      : body instanceof FormData ? body : typeof body === 'string' ? body : JSON.stringify(body),
   });
-  if (!response.ok) {
-    const error = await response.json().catch(() => null);
-    throw new ApiError(response.status, error?.code ?? 'http_error',
-      error?.message ?? `Request failed (${response.status}).`);
-  }
-  if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
+  if (!response.ok) throw await apiFailure(response);
+  return await responseBody<T>(response);
+}
+
+// Every v1 failure answers with {code, message}; a stream can already fail before its first event.
+async function apiFailure(response: Response): Promise<ApiError> {
+  const error = await response.json().catch(() => null);
+  return new ApiError(response.status, error?.code ?? 'http_error',
+    error?.message ?? `Request failed (${response.status}).`);
+}
+
+// Endpoints without a body must not be parsed as JSON, which would report a syntax error.
+async function responseBody<T>(response: Response): Promise<T> {
+  const text = await response.text();
+  return (response.status === 204 || text === '' ? undefined : JSON.parse(text)) as T;
 }
 
 const sessionPath = (id: string) => `/sessions/${encodeURIComponent(id)}`;
+
+// A windowed history read only appends the query parameters the caller actually supplied.
+function historyQuery(page?: HistoryPage): string {
+  const query = new URLSearchParams();
+  if (page?.before !== undefined) query.set('before', String(page.before));
+  if (page?.limit !== undefined) query.set('limit', String(page.limit));
+  const value = query.toString();
+  return value ? `?${value}` : '';
+}
+
+// Turns accept multipart so an image can accompany the prompt.
+function turnForm(prompt: string, image: File, pastMessageIndexes: number[] = []): FormData {
+  const form = new FormData();
+  form.append('prompt', prompt);
+  form.append('image', image, image.name);
+  // Repeated pastExchange fields mirror the bundled form so older scenes can join the prompt context.
+  for (const index of pastMessageIndexes) form.append('pastExchange', String(index));
+  return form;
+}
 
 export const api = {
   currentSession: () => request<Session>('/session'),
@@ -109,7 +169,7 @@ export const api = {
   state: (id: string) => request<SessionState>(`${sessionPath(id)}/state`),
   resetMemory: (id: string, layer: MemoryLayer) => request<void>(`${sessionPath(id)}/memory/reset/${layer}`, 'POST'),
   createSession: (title: string) => request<Session>('/sessions', 'POST', { title }),
-  history: (id: string) => request<{ sessionId: string; messages: StoryMessage[] }>(`${sessionPath(id)}/history`),
+  history: (id: string, page?: HistoryPage) => request<SessionHistory>(`${sessionPath(id)}/history${historyQuery(page)}`),
   config: (id: string) => request<SessionConfig>(`${sessionPath(id)}/config`),
   saveConfig: (id: string, settings: Pick<SessionConfig, 'systemPrompt' | 'fixedProtagonists' | 'rules' | 'temperature' | 'streamingEnabled' | 'validationEnabled'>) =>
     request<SessionConfig>(`${sessionPath(id)}/config`, 'PATCH', settings),
@@ -119,12 +179,34 @@ export const api = {
     body.append('bundle', bundle);
     return request<Session>('/session-imports', 'POST', body);
   },
-  streamTurn: async (id: string, prompt: string, onText: (text: string) => void) => {
+  undo: (id: string) => request<void>(`${sessionPath(id)}/undo`, 'POST'),
+  editMessage: (id: string, messageIndex: number, content: string) =>
+    request<{ sessionId: string; messageIndex: number; content: string }>(
+      `${sessionPath(id)}/messages/${messageIndex}/edit`, 'POST', { content }),
+  saveGraph: (id: string, knowledgeGraph: string) =>
+    request<SessionGraph>(`${sessionPath(id)}/graph`, 'PUT', knowledgeGraph),
+  generateEmptyGraph: (id: string) => request<SessionGraph>(`${sessionPath(id)}/graph/generate-empty`, 'POST'),
+  fillGraph: (id: string) => request<SessionGraph>(`${sessionPath(id)}/graph/fill-fixed-protagonists`, 'POST'),
+  resetGraph: (id: string) => request<SessionGraph>(`${sessionPath(id)}/graph/reset-turn-based`, 'POST'),
+  // Binary endpoints stay plain URLs so the browser can load or download them itself.
+  imageUrl: (id: string, messageIndex: number) => `/v1${sessionPath(id)}/images/${messageIndex}`,
+  exportUrl: (id: string) => `/v1${sessionPath(id)}/export`,
+  turn: (id: string, prompt: string, options: TurnOptions = {}) => request<{
+    sessionId: string; userMessageIndex: number; assistantMessageIndex: number; response: string;
+  }>(`${sessionPath(id)}/turns`, 'POST',
+    options.image
+      ? turnForm(prompt, options.image, options.pastMessageIndexes)
+      : { prompt, pastMessageIndexes: options.pastMessageIndexes ?? [] },
+    options.signal),
+  streamTurn: async (id: string, prompt: string, onText: (text: string) => void, options: TurnOptions = {}) => {
+    const form = options.image ? turnForm(prompt, options.image, options.pastMessageIndexes) : null;
     const response = await fetch(`/v1${sessionPath(id)}/turns/stream`, {
-      method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt }),
+      method: 'POST', credentials: 'same-origin', signal: options.signal,
+      headers: form ? undefined : { 'Content-Type': 'application/json' },
+      body: form ?? JSON.stringify({ prompt, pastMessageIndexes: options.pastMessageIndexes ?? [] }),
     });
-    if (!response.ok || !response.body) throw new Error('Generation could not start.');
+    if (!response.ok) throw await apiFailure(response);
+    if (!response.body) throw new Error('Generation could not start.');
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -149,7 +231,4 @@ export const api = {
       if (!completed) throw new Error('The stream ended before completion.');
     } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
   },
-  turn: (id: string, prompt: string) => request<{
-    sessionId: string; userMessageIndex: number; assistantMessageIndex: number; response: string;
-  }>(`${sessionPath(id)}/turns`, 'POST', { prompt }),
 };

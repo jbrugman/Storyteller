@@ -22,8 +22,10 @@ import nl.llm.storyteller.api.story.SessionKnowledgeGraphService;
 import nl.llm.storyteller.core.JsonSupport;
 import nl.llm.storyteller.core.graph.persistence.KnowledgeGraphJsonCodec;
 import nl.llm.storyteller.db.SessionSettings;
+import nl.llm.storyteller.db.StoryMessageRecord;
 
 import java.io.IOException;
+import java.util.List;
 
 public final class SessionDataController {
   private final SessionService sessionService;
@@ -77,9 +79,34 @@ public final class SessionDataController {
     if (rejectInactiveSession(context, sessionId)) {
       return;
     }
+    Integer before = parseOptionalIndex(context.queryParam("before"), "before");
+    Integer limit = parseOptionalIndex(context.queryParam("limit"), "limit");
+    List<StoryMessageRecord> messages = storyService.loadMessagesBefore(
+      sessionId, before == null ? Integer.MAX_VALUE : before, limit == null ? Integer.MAX_VALUE : limit);
+    // Older pages exist when a limited window stops above the first message; a full read already holds everything.
+    boolean hasOlder = limit != null && !messages.isEmpty() && messages.get(0).messageIndex() > 0;
     context.json(new SessionHistoryResponse(
-      sessionId, storyService.loadMessagesBefore(sessionId, Integer.MAX_VALUE, Integer.MAX_VALUE)
+      sessionId,
+      messages,
+      storyTurnService.referenceBeforeMessageIndex(sessionId),
+      hasOlder
     ));
+  }
+
+  // Optional positive page parameter for windowed history; absent or blank keeps the default, an invalid value is rejected.
+  private Integer parseOptionalIndex(String value, String name) {
+    if (value == null || value.isBlank()) {
+      return null;
+    }
+    try {
+      int parsed = Integer.parseInt(value.trim());
+      if (parsed < 1) {
+        throw new NumberFormatException();
+      }
+      return parsed;
+    } catch (NumberFormatException ex) {
+      throw new IllegalArgumentException("Query parameter '" + name + "' must be a positive integer.", ex);
+    }
   }
 
   private void configuration(Context context) {
