@@ -8,5 +8,6 @@ public record SessionConfigPatchRequest(
   JsonNode rules,
   JsonNode temperature,
   JsonNode streamingEnabled,
-  JsonNode validationEnabled
+  JsonNode validationEnabled,
+  JsonNode graphEnabled
 ) { }

@@ -68,6 +68,16 @@ test('Given graph JSON, When saving it, Then the raw text is sent unchanged and 
   assert.equal(requests[0].init.headers['Content-Type'], 'application/json');
 });
 
+test('Given settings with the knowledge graph toggled, When saving, Then the config PATCH carries graphEnabled', async () => {
+  const settings = {
+    systemPrompt: 'sys', fixedProtagonists: 'yaml', rules: 'rules', temperature: null,
+    streamingEnabled: false, validationEnabled: true, graphEnabled: false,
+  };
+  const { requests } = await capture(() => api.saveConfig('s', settings));
+  assert.equal(requests[0].init.method, 'PATCH');
+  assert.deepEqual(JSON.parse(requests[0].init.body), settings);
+});
+
 test('Given selected past exchanges, When a turn is sent without an image, Then the JSON body carries pastMessageIndexes', async () => {
   const { requests } = await capture(() => api.turn('s', 'Next', { pastMessageIndexes: [0, 2] }));
   assert.equal(requests[0].init.body, JSON.stringify({ prompt: 'Next', pastMessageIndexes: [0, 2] }));

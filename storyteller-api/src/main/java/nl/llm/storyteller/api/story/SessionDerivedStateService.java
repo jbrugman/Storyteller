@@ -12,9 +12,9 @@ public final class SessionDerivedStateService implements AutoCloseable {
     this.graphService = graphService;
   }
 
-  public void requestUpdate(String sessionId) {
+  public void requestUpdate(String sessionId, boolean graphEnabled) {
     memoryService.requestUpdate(sessionId);
-    graphService.requestUpdate(sessionId);
+    graphService.requestUpdate(sessionId, graphEnabled);
   }
 
   @Override

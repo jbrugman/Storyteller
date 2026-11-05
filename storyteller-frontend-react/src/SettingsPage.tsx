@@ -4,7 +4,7 @@ import type { Theme } from './theme';
 import { graphHasData } from './knowledge-graph';
 import type { GraphAction } from './knowledge-graph';
 
-export type EditableSettings = Pick<SessionConfig, 'systemPrompt' | 'fixedProtagonists' | 'rules' | 'temperature' | 'streamingEnabled' | 'validationEnabled'>;
+export type EditableSettings = Pick<SessionConfig, 'systemPrompt' | 'fixedProtagonists' | 'rules' | 'temperature' | 'streamingEnabled' | 'validationEnabled' | 'graphEnabled'>;
 interface Props {
   config: SessionConfig;
   busy: boolean;
@@ -30,10 +30,11 @@ export default function SettingsPage({ config, busy, theme, graphText, onGraphTe
   const [rules, setRules] = useState(config.rules);
   const [streamingEnabled, setStreamingEnabled] = useState(config.effectiveStreamingEnabled);
   const [validationEnabled, setValidationEnabled] = useState(config.effectiveValidationEnabled);
+  const [graphEnabled, setGraphEnabled] = useState(config.effectiveGraphEnabled);
   const [useDefault, setUseDefault] = useState(config.temperature === null);
   const [temperature, setTemperature] = useState(config.temperature ?? config.effectiveTemperature ?? 1);
   const currentSettings = (): EditableSettings => ({
-    systemPrompt, fixedProtagonists, rules, temperature: useDefault ? null : temperature, streamingEnabled, validationEnabled,
+    systemPrompt, fixedProtagonists, rules, temperature: useDefault ? null : temperature, streamingEnabled, validationEnabled, graphEnabled,
   });
   const runGraphAction = (action: GraphAction) => {
     if (!graphHasData(graphText) || window.confirm(graphWarnings[action])) onGraphAction(action, currentSettings());
@@ -70,6 +71,11 @@ export default function SettingsPage({ config, busy, theme, graphText, onGraphTe
       <label htmlFor="rules">Rules</label>
       <textarea id="rules" rows={12} maxLength={1000000} required value={rules}
         onChange={event => setRules(event.target.value)} disabled={busy} />
+      <fieldset disabled={busy}>
+        <legend>Knowledge graph</legend>
+        <label><input type="checkbox" id="graphEnabled" checked={graphEnabled} onChange={event => setGraphEnabled(event.target.checked)} />Use the knowledge graph</label>
+        <p className="setting-hint">When on, facts from the graph below ground story generation and validation, and each turn updates the graph automatically. Manual graph tools below always stay available. When off, the story ignores the graph and stops updating it; stored facts are kept. Defaults to the server's graph.enabled setting and is saved per session in the database.</p>
+      </fieldset>
       <label htmlFor="knowledgeGraph">Knowledge graph (JSON)</label>
       <textarea id="knowledgeGraph" rows={18} maxLength={1000000} required value={graphText}
         onChange={event => onGraphTextChange(event.target.value)} disabled={busy} />

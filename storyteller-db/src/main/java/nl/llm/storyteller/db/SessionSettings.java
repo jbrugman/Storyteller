@@ -9,7 +9,8 @@ public record SessionSettings(
   KnowledgeGraphDocument knowledgeGraph,
   Double temperature,
   Boolean streamingEnabled,
-  Boolean validationEnabled
+  Boolean validationEnabled,
+  Boolean graphEnabled
 ) {
   public SessionSettings {
     if (Boolean.TRUE.equals(streamingEnabled) && Boolean.TRUE.equals(validationEnabled)) {
@@ -27,8 +28,12 @@ public record SessionSettings(
     return validationEnabled != null ? validationEnabled : defaultValue;
   }
 
+  public boolean graphEnabled(boolean defaultValue) {
+    return graphEnabled != null ? graphEnabled : defaultValue;
+  }
+
   public SessionSettings(SessionPrompts prompts, KnowledgeGraphDocument knowledgeGraph, Double temperature) {
-    this(prompts, knowledgeGraph, temperature, null, null);
+    this(prompts, knowledgeGraph, temperature, null, null, null);
   }
 
   public SessionSettings(SessionPrompts prompts, KnowledgeGraphDocument knowledgeGraph) {

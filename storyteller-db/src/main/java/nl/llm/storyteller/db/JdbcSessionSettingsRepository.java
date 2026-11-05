@@ -9,7 +9,8 @@ import java.util.Map;
 
 public final class JdbcSessionSettingsRepository implements SessionSettingsRepository {
   private static final String SELECT_SESSION_CONFIGURATION = """
-    SELECT temperature, streaming_enabled, validation_enabled FROM session_configuration WHERE session_id = ?
+    SELECT temperature, streaming_enabled, validation_enabled, graph_enabled
+      FROM session_configuration WHERE session_id = ?
     """;
   private static final String UPDATE_SESSION_CONFIGURATION_TEMPERATURE = """
     UPDATE session_configuration SET temperature = ? WHERE session_id = ?
@@ -34,7 +35,8 @@ public final class JdbcSessionSettingsRepository implements SessionSettingsRepos
           if (!rows.next()) throw new SQLException("Session configuration does not exist: " + sessionId);
           BigDecimal temperature = rows.getBigDecimal("temperature");
           return new SessionSettings(prompts, graph, temperature == null ? null : temperature.doubleValue(),
-            rows.getObject("streaming_enabled", Boolean.class), rows.getObject("validation_enabled", Boolean.class));
+            rows.getObject("streaming_enabled", Boolean.class), rows.getObject("validation_enabled", Boolean.class),
+            rows.getObject("graph_enabled", Boolean.class));
         }
       }
     } catch (SQLException ex) {
@@ -69,12 +71,13 @@ public final class JdbcSessionSettingsRepository implements SessionSettingsRepos
   public void patchConfiguration(
     String sessionId, Map<String, String> prompts, boolean updateTemperature, Double temperature
   ) {
-    patchConfiguration(sessionId, prompts, updateTemperature, temperature, false, null, null);
+    patchConfiguration(sessionId, prompts, updateTemperature, temperature, false, null, null, false, null);
   }
 
   @Override
   public void patchConfiguration(String sessionId, Map<String, String> prompts, boolean updateTemperature,
-    Double temperature, boolean updateGeneration, Boolean streamingEnabled, Boolean validationEnabled) {
+    Double temperature, boolean updateGeneration, Boolean streamingEnabled, Boolean validationEnabled,
+    boolean updateGraph, Boolean graphEnabled) {
     if (Boolean.TRUE.equals(streamingEnabled) && Boolean.TRUE.equals(validationEnabled)) {
       throw new IllegalArgumentException("Streaming and validation cannot both be enabled.");
     }
@@ -87,8 +90,8 @@ public final class JdbcSessionSettingsRepository implements SessionSettingsRepos
         if (updateTemperature) {
           updateTemperatureInTransaction(connection, sessionId, temperature);
         }
-        if (updateGeneration) {
-          updateGeneration(connection, sessionId, streamingEnabled, validationEnabled);
+        if (updateGeneration || updateGraph) {
+          updateGeneration(connection, sessionId, streamingEnabled, validationEnabled, graphEnabled);
         }
         connection.commit();
       } catch (SQLException ex) {
@@ -100,13 +103,15 @@ public final class JdbcSessionSettingsRepository implements SessionSettingsRepos
     }
   }
 
-  private void updateGeneration(Connection connection, String sessionId, Boolean streaming, Boolean validation)
-    throws SQLException {
+  private void updateGeneration(Connection connection, String sessionId, Boolean streaming, Boolean validation,
+    Boolean graph) throws SQLException {
     try (PreparedStatement statement = connection.prepareStatement(
-      "UPDATE session_configuration SET streaming_enabled = ?, validation_enabled = ? WHERE session_id = ?")) {
+      "UPDATE session_configuration SET streaming_enabled = ?, validation_enabled = ?, graph_enabled = ?"
+        + " WHERE session_id = ?")) {
       statement.setObject(1, streaming, java.sql.Types.BOOLEAN);
       statement.setObject(2, validation, java.sql.Types.BOOLEAN);
-      statement.setString(3, sessionId);
+      statement.setObject(3, graph, java.sql.Types.BOOLEAN);
+      statement.setString(4, sessionId);
       requireUpdated(statement, "Session configuration does not exist: " + sessionId);
     }
   }
@@ -133,7 +138,8 @@ public final class JdbcSessionSettingsRepository implements SessionSettingsRepos
       updatePrompt(connection, sessionId, SessionPrompts.RULES_NAME, settings.prompts().rules());
       bundleRepository.replaceGraph(connection, sessionId, settings.knowledgeGraph());
       updateTemperatureInTransaction(connection, sessionId, settings.temperature());
-      updateGeneration(connection, sessionId, settings.streamingEnabled(), settings.validationEnabled());
+      updateGeneration(connection, sessionId, settings.streamingEnabled(), settings.validationEnabled(),
+        settings.graphEnabled());
       connection.commit();
     } catch (SQLException ex) {
       rollback(connection, ex);

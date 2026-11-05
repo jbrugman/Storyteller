@@ -101,4 +101,33 @@ class JdbcSessionSettingsRepositoryTest {
       "first", java.util.Map.of(), false, null, true, true, true));
     assertEquals(Boolean.FALSE, reloaded.load("first").validationEnabled());
   }
+
+  @Test
+  @DisplayName("""
+    Given sessions whose knowledge graph use is toggled through a configuration patch,
+    When another repository opens the same database,
+    Then the tri-state choice persists, an unrelated patch leaves it, and an absent choice inherits
+    """)
+  void shouldPersistKnowledgeGraphToggleAcrossRepositoryReload() {
+    String url = "jdbc:h2:file:" + temporaryDirectory.resolve("graph-toggle");
+    Database database = new Database(url, "sa", "");
+    new SchemaInitializer(database).initialize();
+    Instant now = Instant.now();
+    var sessions = new JdbcSessionRepository(database);
+    for (String id : java.util.List.of("on", "off", "inherit")) {
+      sessions.create(new SessionRecord(id, "Story", now, now, now, now.plusSeconds(3600), false),
+        new SessionPrompts("System", "Fixed", "Rules"));
+    }
+    var repository = new JdbcSessionSettingsRepository(database);
+    org.junit.jupiter.api.Assertions.assertNull(repository.load("on").graphEnabled(), "A fresh session inherits the core default");
+    repository.patchConfiguration("on", java.util.Map.of(), false, null, false, null, null, true, true);
+    repository.patchConfiguration("off", java.util.Map.of(), false, null, false, null, null, true, false);
+
+    var reloaded = new JdbcSessionSettingsRepository(new Database(url, "sa", ""));
+    reloaded.patchConfiguration("on", java.util.Map.of(), true, 0.5);
+
+    assertEquals(Boolean.TRUE, reloaded.load("on").graphEnabled(), "An explicit on choice survives an unrelated temperature patch");
+    assertEquals(Boolean.FALSE, reloaded.load("off").graphEnabled());
+    org.junit.jupiter.api.Assertions.assertNull(reloaded.load("inherit").graphEnabled(), "An untouched session still inherits");
+  }
 }

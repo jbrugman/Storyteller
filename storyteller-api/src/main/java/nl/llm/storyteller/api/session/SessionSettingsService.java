@@ -19,16 +19,18 @@ public final class SessionSettingsService {
   private final KnowledgeGraphValidator graphValidator;
   private final boolean defaultStreaming;
   private final boolean defaultValidation;
+  private final boolean defaultGraph;
   private final KnowledgeGraphJsonCodec graphCodec = new KnowledgeGraphJsonCodec();
 
   public SessionSettingsService(SessionSettingsRepository repository, KnowledgeGraphValidator graphValidator) {
-    this(repository, graphValidator, false, true);
+    this(repository, graphValidator, false, true, true);
   }
 
   public SessionSettingsService(SessionSettingsRepository repository, KnowledgeGraphValidator graphValidator,
-    boolean defaultStreaming, boolean defaultValidation) {
+    boolean defaultStreaming, boolean defaultValidation, boolean defaultGraph) {
     this.defaultStreaming = defaultStreaming;
     this.defaultValidation = defaultValidation;
+    this.defaultGraph = defaultGraph;
     this.repository = repository;
     this.graphValidator = graphValidator;
   }
@@ -53,7 +55,7 @@ public final class SessionSettingsService {
     FixedProtagonistsValidator.validate(prompts.fixedProtagonists());
     SessionSettings current = repository.load(sessionId);
     repository.save(sessionId, new SessionSettings(prompts, parseKnowledgeGraph(knowledgeGraph), temperature,
-      current.streamingEnabled(), current.validationEnabled()));
+      current.streamingEnabled(), current.validationEnabled(), current.graphEnabled()));
   }
 
   public boolean streamingEnabled(SessionSettings settings) {
@@ -64,6 +66,10 @@ public final class SessionSettingsService {
     return settings.validationEnabled(defaultValidation);
   }
 
+  public boolean graphEnabled(SessionSettings settings) {
+    return settings.graphEnabled(defaultGraph);
+  }
+
   public void validateGeneration(Boolean streaming, Boolean validation) {
     if ((streaming != null ? streaming : defaultStreaming)
       && (validation != null ? validation : defaultValidation)) {
@@ -72,7 +78,7 @@ public final class SessionSettingsService {
   }
 
   public void save(String sessionId, String systemPrompt, String fixedProtagonists, String rules,
-    String knowledgeGraph, Double temperature, Boolean streaming, Boolean validation) {
+    String knowledgeGraph, Double temperature, Boolean streaming, Boolean validation, Boolean graph) {
     validateGeneration(streaming, validation);
     SessionPrompts prompts = new SessionPrompts(
       requiredMultiline(systemPrompt, "System prompt", MAX_PROMPT_LENGTH),
@@ -80,7 +86,7 @@ public final class SessionSettingsService {
       requiredMultiline(rules, "Rules", MAX_PROMPT_LENGTH));
     FixedProtagonistsValidator.validate(prompts.fixedProtagonists());
     repository.save(sessionId, new SessionSettings(prompts, parseKnowledgeGraph(knowledgeGraph), temperature,
-      streaming, validation));
+      streaming, validation, graph));
   }
 
   public String formatKnowledgeGraph(SessionSettings settings) {
@@ -101,15 +107,16 @@ public final class SessionSettingsService {
     Double temperature
   ) {
     patchConfiguration(sessionId, systemPrompt, fixedProtagonists, rules, updateTemperature, temperature,
-      false, null, false, null);
+      false, null, false, null, false, null);
   }
 
   public synchronized void patchConfiguration(String sessionId, String systemPrompt, String fixedProtagonists,
     String rules, boolean updateTemperature, Double temperature, boolean updateStreaming, Boolean streaming,
-    boolean updateValidation, Boolean validation) {
+    boolean updateValidation, Boolean validation, boolean updateGraph, Boolean graph) {
     SessionSettings current = repository.load(sessionId);
     Boolean effectiveStreaming = updateStreaming ? streaming : current.streamingEnabled();
     Boolean effectiveValidation = updateValidation ? validation : current.validationEnabled();
+    Boolean effectiveGraph = updateGraph ? graph : current.graphEnabled();
     validateGeneration(effectiveStreaming, effectiveValidation);
     var prompts = new LinkedHashMap<String, String>();
     if (systemPrompt != null) {
@@ -128,7 +135,8 @@ public final class SessionSettingsService {
       throw new IllegalArgumentException("temperature must be a number between 0 and 2, or null.");
     }
     repository.patchConfiguration(sessionId, prompts, updateTemperature, temperature,
-      updateStreaming || updateValidation, effectiveStreaming, effectiveValidation);
+      updateStreaming || updateValidation || updateGraph, effectiveStreaming, effectiveValidation,
+      updateGraph, effectiveGraph);
   }
 
   private KnowledgeGraphDocument parseKnowledgeGraph(String knowledgeGraph) {

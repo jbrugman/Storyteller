@@ -9,6 +9,8 @@ public record SessionConfigResponse(
   Double effectiveTemperature,
   Boolean streamingEnabled,
   Boolean validationEnabled,
+  Boolean graphEnabled,
   boolean effectiveStreamingEnabled,
-  boolean effectiveValidationEnabled
+  boolean effectiveValidationEnabled,
+  boolean effectiveGraphEnabled
 ) { }

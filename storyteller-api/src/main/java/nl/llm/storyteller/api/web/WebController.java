@@ -211,7 +211,8 @@ public final class WebController {
         valueOrEmpty(context.queryParam("notificationMessage"))
       ),
       "streamingEnabled", settingsService.streamingEnabled(settings),
-      "validationEnabled", settingsService.validationEnabled(settings)
+      "validationEnabled", settingsService.validationEnabled(settings),
+      "graphEnabled", settingsService.graphEnabled(settings)
     ));
   }
 
@@ -428,7 +429,8 @@ public final class WebController {
       context.formParam("knowledgeGraph"),
       temperature,
       submittedStreaming(context, session.get().sessionId()),
-      submittedValidation(context, session.get().sessionId())
+      submittedValidation(context, session.get().sessionId()),
+      submittedGraph(context, session.get().sessionId())
     );
     cookieService.write(context, session.get().sessionId(), session.get().infinite());
     context.redirect("/story", HttpStatus.SEE_OTHER);
@@ -442,6 +444,11 @@ public final class WebController {
   private Boolean submittedValidation(Context context, String sessionId) {
     return context.formParam("generationSettings") != null ? Boolean.valueOf(context.formParam("validationEnabled") != null)
       : settingsService.load(sessionId).validationEnabled();
+  }
+
+  private Boolean submittedGraph(Context context, String sessionId) {
+    return context.formParam("generationSettings") != null ? Boolean.valueOf(context.formParam("graphEnabled") != null)
+      : settingsService.load(sessionId).graphEnabled();
   }
 
   private Double parseTemperature(String value) {
@@ -475,7 +482,8 @@ public final class WebController {
     );
     try {
       settingsService.save(session.sessionId(), systemPrompt, fixedProtagonists, rules, knowledgeGraph, temperature,
-        submittedStreaming(context, session.sessionId()), submittedValidation(context, session.sessionId()));
+        submittedStreaming(context, session.sessionId()), submittedValidation(context, session.sessionId()),
+        submittedGraph(context, session.sessionId()));
     } catch (InvalidFixedProtagonistsException ex) {
       context.render("settings.jte", Map.of("page", StorySettingsPage.invalidYaml(
         submittedPrompts,
@@ -483,7 +491,8 @@ public final class WebController {
         effectiveTemperature(temperature),
         ex
       ), "streamingEnabled", Boolean.TRUE.equals(submittedStreaming(context, session.sessionId())),
-        "validationEnabled", Boolean.TRUE.equals(submittedValidation(context, session.sessionId()))));
+        "validationEnabled", Boolean.TRUE.equals(submittedValidation(context, session.sessionId())),
+        "graphEnabled", Boolean.TRUE.equals(submittedGraph(context, session.sessionId()))));
       return true;
     } catch (InvalidKnowledgeGraphException ex) {
       context.render("settings.jte", Map.of("page", StorySettingsPage.invalidKnowledgeGraph(
@@ -492,7 +501,8 @@ public final class WebController {
         effectiveTemperature(temperature),
         ex
       ), "streamingEnabled", Boolean.TRUE.equals(submittedStreaming(context, session.sessionId())),
-        "validationEnabled", Boolean.TRUE.equals(submittedValidation(context, session.sessionId()))));
+        "validationEnabled", Boolean.TRUE.equals(submittedValidation(context, session.sessionId())),
+        "graphEnabled", Boolean.TRUE.equals(submittedGraph(context, session.sessionId()))));
       return true;
     }
     return false;

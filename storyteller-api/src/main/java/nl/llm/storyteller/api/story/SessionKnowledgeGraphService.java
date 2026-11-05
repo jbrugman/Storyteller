@@ -47,8 +47,8 @@ public final class SessionKnowledgeGraphService implements AutoCloseable {
     this.validator = new KnowledgeGraphValidator(predicates);
   }
 
-  public void requestUpdate(String sessionId) {
-    if (!config.graphEnabled()) {
+  public void requestUpdate(String sessionId, boolean graphEnabled) {
+    if (!config.graphEnabled() || !graphEnabled) {
       return;
     }
     var graphRepository = new JdbcKnowledgeGraphRepository(database, sessionId, validator);
