@@ -15,6 +15,7 @@ CREATE TABLE session_configuration (
   top_p DECIMAL(4, 3),
   validation_enabled BOOLEAN,
   streaming_enabled BOOLEAN,
+  graph_enabled BOOLEAN,
   PRIMARY KEY (session_id),
   FOREIGN KEY (session_id) REFERENCES story_session (session_id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_bin;

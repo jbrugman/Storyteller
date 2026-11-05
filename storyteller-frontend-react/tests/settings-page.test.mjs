@@ -9,8 +9,8 @@ const SettingsPage = loadDefault('SettingsPage');
 
 const config = {
   sessionId: 'session-1', systemPrompt: 'sys', fixedProtagonists: 'yaml', rules: 'rules',
-  temperature: null, effectiveTemperature: 0.7, streamingEnabled: null, validationEnabled: null,
-  effectiveStreamingEnabled: true, effectiveValidationEnabled: false,
+  temperature: null, effectiveTemperature: 0.7, streamingEnabled: null, validationEnabled: null, graphEnabled: null,
+  effectiveStreamingEnabled: true, effectiveValidationEnabled: false, effectiveGraphEnabled: true,
 };
 
 function render(overrides = {}) {
@@ -30,6 +30,24 @@ test('Given the settings form, When rendering, Then the knowledge graph is edita
   const html = render();
   assert.ok(html.includes('Knowledge graph (JSON)'));
   assert.ok(html.includes('id="knowledgeGraph"'));
+});
+
+// Extracts the rendered <input ... id="graphEnabled" ...> tag so checked-state assertions stay precise.
+const graphToggle = (html) => html.match(/<input[^>]*id="graphEnabled"[^>]*>/)?.[0] ?? '';
+
+test('Given a session with graph use on, When rendering, Then the toggle is checked and sits above the graph editor', () => {
+  const html = render();
+  const toggle = graphToggle(html);
+  assert.ok(toggle.length > 0, 'Expected a knowledge graph toggle');
+  assert.ok(toggle.includes('checked'), 'Expected the toggle to be checked when effective graph use is on');
+  assert.ok(html.indexOf('id="graphEnabled"') < html.indexOf('id="knowledgeGraph"'), 'Expected the toggle above the graph editor');
+});
+
+test('Given a session with graph use off, When rendering, Then the toggle is unchecked', () => {
+  const html = render({ config: { ...config, graphEnabled: false, effectiveGraphEnabled: false } });
+  const toggle = graphToggle(html);
+  assert.ok(toggle.length > 0, 'Expected a knowledge graph toggle');
+  assert.ok(!toggle.includes('checked'), 'Expected the toggle to be unchecked when effective graph use is off');
 });
 
 test('Given the settings form, When rendering, Then all three graph tools are present under their own group label', () => {

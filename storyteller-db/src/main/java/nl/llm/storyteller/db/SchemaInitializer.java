@@ -41,6 +41,7 @@ public final class SchemaInitializer {
       if (existingSchemaTables.equals(EXPECTED_TABLES)) {
         addInfiniteSessionColumnIfMissing(connection);
         addColumnIfMissing(connection, "SESSION_CONFIGURATION", "STREAMING_ENABLED", "streaming_enabled BOOLEAN");
+        addColumnIfMissing(connection, "SESSION_CONFIGURATION", "GRAPH_ENABLED", "graph_enabled BOOLEAN");
         addStoryImageColumnsIfMissing(connection);
         DatabaseEncryptionMigration.initialize(database, connection, existingTables);
         return;

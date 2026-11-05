@@ -100,7 +100,7 @@ class SessionKnowledgeGraphServiceTest {
       database, AppConfig.load(), (_, _, _) -> response.toString()
     )) {
       // When
-      service.requestUpdate(SESSION_ID);
+      service.requestUpdate(SESSION_ID, true);
       assertTrue(service.awaitIdle());
     }
 
@@ -262,7 +262,7 @@ class SessionKnowledgeGraphServiceTest {
         Instant.parse("2026-09-08T12:02:00Z")
       );
       revisionBeforeExtraction = graphRepository(database).load().revision();
-      service.requestUpdate(SESSION_ID);
+      service.requestUpdate(SESSION_ID, true);
       assertTrue(service.awaitIdle());
     }
 

@@ -257,7 +257,10 @@ The `Ctrl-W` / reset turn is treated as a control action rather than as a normal
 - it does not trigger summary, recent-summary, or canonical-state refreshes
 
 Set `graph.enabled=false` to disable both graph injection and automatic turn-based graph extraction. This is the same
-core switch used by the benchmark; `validation.enabled` controls validation in the same way.
+core switch used by the benchmark; `validation.enabled` controls validation in the same way. Each session can additionally
+turn the knowledge graph off from its settings (both the built-in web interface and the React front-end): leaving the toggle
+unset inherits `graph.enabled`, while a session choice can only turn it off for that session because `graph.enabled=false`
+always wins as a global upper bound.
 
 The `Ctrl-U` / undo-and-retry action builds on that reset flow:
 - it removes the last user+assistant turn from the H2 story history
@@ -599,6 +602,13 @@ Not yet.
 ```
 
 ## Changelog
+### 2.1.7
+- Fixed the web interface and HTTP API collecting knowledge-graph facts without using them. Previously, only the CLI used these facts to guide story generation and validation.
+- Story prompts now include relevant facts about entities mentioned in the user’s prompt. Validation prompts also include facts about entities mentioned in the draft response.
+- Reuses the graph already loaded for the turn, with no extra database queries. Setting graph.enabled=false disables fact injection, matching the CLI.
+- Invalid stored graphs no longer interrupt a turn; generation continues without graph facts. Prompts that mention no known entities remain unchanged.
+- Added a per-session knowledge-graph toggle to both the built-in web interface and the React front-end.
+
 ### 2.1.6
 - Aligned the React front-end example with the built-in JTE web interface: 
   image prompts (pick, paste, preview, and lightbox), undo, response editing, export, knowledge-graph editing with its graph tools, and the model-unavailable dialog.

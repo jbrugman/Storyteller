@@ -10,6 +10,11 @@ import nl.llm.storyteller.db.StoryImage;
 import nl.llm.storyteller.db.StoryRepository;
 import nl.llm.storyteller.db.StoryTurnRecord;
 import nl.llm.storyteller.core.config.AppConfig;
+import nl.llm.storyteller.core.graph.KnowledgeGraphSnapshot;
+import nl.llm.storyteller.core.graph.KnowledgeGraphValidator;
+import nl.llm.storyteller.core.graph.PredicateCatalog;
+import nl.llm.storyteller.core.graph.model.KnowledgeGraphDocument;
+import nl.llm.storyteller.core.graph.service.ReadOnlyKnowledgeGraphService;
 import nl.llm.storyteller.core.model.Message;
 import nl.llm.storyteller.core.model.StoryChatPromptInput;
 import nl.llm.storyteller.core.model.ValidationPromptInput;
@@ -41,6 +46,8 @@ public final class StoryTurnService {
   private final ResponseGuard responseGuard;
   private final StoryChatPromptBuilder storyPromptBuilder;
   private final ValidationPromptBuilder validationPromptBuilder;
+  private final KnowledgeGraphValidator graphValidator;
+  private final PredicateCatalog predicates;
   private final Clock clock;
 
   public StoryTurnService(
@@ -50,11 +57,13 @@ public final class StoryTurnService {
     SessionDerivedStateService derivedStateService,
     AppConfig config,
     ChatClient chatClient,
-    ChatClient validationClient
+    ChatClient validationClient,
+    KnowledgeGraphValidator graphValidator,
+    PredicateCatalog predicates
   ) {
     this(
       repository, settingsRepository, memoryRepository, derivedStateService,
-      config, chatClient, validationClient, Clock.systemUTC()
+      config, chatClient, validationClient, graphValidator, predicates, Clock.systemUTC()
     );
   }
 
@@ -66,6 +75,8 @@ public final class StoryTurnService {
     AppConfig config,
     ChatClient chatClient,
     ChatClient validationClient,
+    KnowledgeGraphValidator graphValidator,
+    PredicateCatalog predicates,
     Clock clock
   ) {
     PromptLoader resources = new PromptLoader(config);
@@ -79,6 +90,8 @@ public final class StoryTurnService {
     this.responseGuard = new ResponseGuard(validationClient, config);
     this.storyPromptBuilder = new StoryChatPromptBuilder(resources, templates);
     this.validationPromptBuilder = new ValidationPromptBuilder(resources, templates);
+    this.graphValidator = graphValidator;
+    this.predicates = predicates;
     this.clock = clock;
   }
 
@@ -118,10 +131,12 @@ public final class StoryTurnService {
     SessionPrompts prompts = settings.prompts();
     SessionMemory memory = memoryRepository.load(sessionId);
     String relevantPastStory = relevantPastStory(sessionId, pastMessageIndexes);
+    boolean graphEnabled = settings.graphEnabled(config.graphEnabled());
+    ReadOnlyKnowledgeGraphService graph = graphGrounding(settings.knowledgeGraph(), graphEnabled);
     var recentMessages = repository.loadRecentMessages(sessionId, config.maxRecentTurns() * 2);
     List<Message> messages = new ArrayList<>(storyPromptBuilder.build(new StoryChatPromptInput(
-      userInput, memory.canonicalState(), memory.summary(), memory.recentSummary(), "",
-      relevantPastStory, recentMessages, ""
+      userInput, memory.canonicalState(), memory.summary(), memory.recentSummary(),
+      relevantFacts(graph, userInput), relevantPastStory, recentMessages, ""
     ), prompts.systemPrompt(), prompts.fixedProtagonists()));
     if (image != null) {
       Message userMessage = messages.getLast();
@@ -144,9 +159,9 @@ public final class StoryTurnService {
     String draftResponse = onText == null
       ? chatClient.chat(messages, options, config.requestTimeoutSeconds())
       : chatClient.stream(messages, options, config.requestTimeoutSeconds(), onText);
-    String response = validate(userInput, draftResponse, prompts, validation);
+    String response = validate(userInput, draftResponse, prompts, validation, graph);
     StoryTurnRecord stored = repository.appendTurn(sessionId, userInput, response, image, clock.instant());
-    derivedStateService.requestUpdate(sessionId);
+    derivedStateService.requestUpdate(sessionId, graphEnabled);
     return new StoryTurnResult(stored.userMessageIndex(), stored.assistantMessageIndex(), response);
   }
 
@@ -159,18 +174,38 @@ public final class StoryTurnService {
     repository.undoLastTurn(sessionId, clock.instant());
   }
 
-  private String validate(String userInput, String draftResponse, SessionPrompts prompts, boolean validationEnabled)
-    throws InterruptedException {
+  private String validate(String userInput, String draftResponse, SessionPrompts prompts, boolean validationEnabled,
+    ReadOnlyKnowledgeGraphService graph) throws InterruptedException {
     if (!validationEnabled) {
       return responseGuard.validate("", "", draftResponse, false);
     }
     String systemPrompt = validationPromptBuilder.buildSystemPrompt();
     String request = validationPromptBuilder.buildRequest(
-      new ValidationPromptInput(userInput, draftResponse, ""),
+      new ValidationPromptInput(userInput, draftResponse, relevantFacts(graph, userInput + "\n" + draftResponse)),
       prompts.rules(),
       prompts.fixedProtagonists()
     );
     return responseGuard.validate(systemPrompt, request, draftResponse, true);
+  }
+
+  /**
+   * Builds the per-turn prompt grounding from the graph already stored for this session.
+   * Returns null when the feature is disabled or the stored graph no longer validates; a broken graph
+   * must never break a story turn, so grounding fails open and the turn simply runs without it.
+   */
+  private ReadOnlyKnowledgeGraphService graphGrounding(KnowledgeGraphDocument graph, boolean graphEnabled) {
+    if (!config.graphEnabled() || !graphEnabled) {
+      return null;
+    }
+    try {
+      return new ReadOnlyKnowledgeGraphService(KnowledgeGraphSnapshot.from(graph, graphValidator), predicates);
+    } catch (RuntimeException _) {
+      return null;
+    }
+  }
+
+  private static String relevantFacts(ReadOnlyKnowledgeGraphService graph, String text) {
+    return graph == null ? "" : graph.relevantFacts(text);
   }
 
   private String normalizePrompt(String prompt) {

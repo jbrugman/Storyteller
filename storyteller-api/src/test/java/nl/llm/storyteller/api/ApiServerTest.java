@@ -38,6 +38,32 @@ class ApiServerTest {
     {"schemaVersion":1,"revision":0,"entities":{},"facts":[]}
     """;
 
+  private static final String AUTHORITATIVE_GRAPH = """
+    {
+      "schemaVersion": 1,
+      "revision": 0,
+      "entities": {
+        "character.alice": { "type": "CHARACTER", "name": "Alice", "aliases": [], "source": "FIXED_PROTAGONIST" },
+        "item.compass": { "type": "ITEM", "name": "Compass", "aliases": [], "source": "FIXED_PROTAGONIST" }
+      },
+      "facts": [{
+        "id": "fact.alice_possesses_compass",
+        "subject": "character.alice",
+        "predicate": "POSSESSES",
+        "object": "item.compass",
+        "polarity": "POSITIVE",
+        "status": "ACTIVE",
+        "source": "FIXED_PROTAGONIST",
+        "sourceTurn": 0,
+        "hard": true
+      }]
+    }
+    """;
+
+  private static final String GRAPH_FACTS_HEADER =
+    "Knowledge graph facts (authoritative; do not transfer traits between characters):";
+  private static final String COMPASS_FACT = "- Alice possesses Compass.";
+
   @TempDir
   Path temporaryDirectory;
 
@@ -143,6 +169,110 @@ class ApiServerTest {
     assertEquals(3, secondBody.path("assistantMessageIndex").asInt());
     assertEquals(List.of("system", "user", "assistant", "user"),
       chatClient.requests().get(1).stream().map(Message::role).toList());
+  }
+
+  @Test
+  @DisplayName("""
+    Given an active API session holding an authoritative knowledge graph fact,
+    When two story turns run with validation enabled, one without and one with a mention of the known character,
+    Then each story prompt should be grounded in the facts mentioned by its prompt while validation is also grounded in the facts mentioned by the draft
+    """)
+  void shouldGroundStoryAndValidationPromptsInKnowledgeGraphFacts() throws Exception {
+    Path coreOverride = temporaryDirectory.resolve("graph-grounding-core.config");
+    Files.writeString(coreOverride, "validation.enabled=true\n");
+    RecordingChatClient storyClient = new RecordingChatClient(List.of(
+      "Alice hides the Compass.", "The Compass stays hidden."
+    ));
+    RecordingChatClient validationClient = new RecordingChatClient(List.of(
+      "{\"decision\":\"ALLOW\"}", "{\"decision\":\"ALLOW\"}"
+    ));
+    server = ApiServer.create(
+      config(), AppConfigLoader.load(temporaryDirectory, coreOverride), storyClient, validationClient
+    );
+    server.start();
+    HttpClient client = HttpClient.newHttpClient();
+    String sessionId = createSession(client);
+    HttpResponse<String> stored = replaceGraph(client, sessionId, AUTHORITATIVE_GRAPH);
+
+    HttpResponse<String> unmentioned = submitTurn(client, sessionId, "What happens next?");
+    HttpResponse<String> mentioned = submitTurn(client, sessionId, "What does Alice carry?");
+
+    assertEquals(200, stored.statusCode());
+    assertEquals(200, unmentioned.statusCode());
+    assertEquals("Alice hides the Compass.",
+      JsonSupport.OBJECT_MAPPER.readTree(unmentioned.body()).path("response").asText());
+    assertEquals(200, mentioned.statusCode());
+    String unmentionedSystemPrompt = storyClient.requests().get(0).getFirst().content();
+    String mentionedSystemPrompt = storyClient.requests().get(1).getFirst().content();
+    String validationRequest = validationClient.requests().get(0).get(1).content();
+    assertFalse(unmentionedSystemPrompt.contains(GRAPH_FACTS_HEADER));
+    assertTrue(validationRequest.contains(GRAPH_FACTS_HEADER));
+    assertTrue(validationRequest.contains(COMPASS_FACT));
+    assertTrue(mentionedSystemPrompt.contains(GRAPH_FACTS_HEADER));
+    assertTrue(mentionedSystemPrompt.contains(COMPASS_FACT));
+  }
+
+  @Test
+  @DisplayName("""
+    Given an active API session holding an authoritative knowledge graph fact while graph.enabled is false,
+    When a story turn mentions the known character,
+    Then the story prompt should not contain any knowledge graph grounding
+    """)
+  void shouldNotGroundStoryPromptWhenKnowledgeGraphIsDisabled() throws Exception {
+    Path coreOverride = temporaryDirectory.resolve("graph-disabled-core.config");
+    Files.writeString(coreOverride, "graph.enabled=false\nvalidation.enabled=false\n");
+    RecordingChatClient chatClient = new RecordingChatClient(List.of("The night goes on."));
+    server = ApiServer.create(
+      config(), AppConfigLoader.load(temporaryDirectory, coreOverride), chatClient, chatClient
+    );
+    server.start();
+    HttpClient client = HttpClient.newHttpClient();
+    String sessionId = createSession(client);
+    HttpResponse<String> stored = replaceGraph(client, sessionId, AUTHORITATIVE_GRAPH);
+
+    HttpResponse<String> turn = submitTurn(client, sessionId, "What does Alice carry?");
+
+    assertEquals(200, stored.statusCode());
+    assertEquals(200, turn.statusCode());
+    assertFalse(chatClient.requests().getFirst().getFirst().content().contains(GRAPH_FACTS_HEADER));
+  }
+
+  @Test
+  @DisplayName("""
+    Given an active API session holding an authoritative knowledge graph fact while the core graph switch stays on,
+    When the per-session knowledge graph toggle is turned off and a story turn mentions the known character, then turned back on,
+    Then the story prompt should drop the graph grounding while off and regain it once re-enabled
+    """)
+  void shouldHonourPerSessionKnowledgeGraphToggle() throws Exception {
+    Path coreOverride = temporaryDirectory.resolve("graph-per-session-toggle.config");
+    Files.writeString(coreOverride, "validation.enabled=false\n");
+    RecordingChatClient storyClient = new RecordingChatClient(List.of(
+      "The Compass stays hidden.", "Alice carries the Compass."
+    ));
+    server = ApiServer.create(
+      config(), AppConfigLoader.load(temporaryDirectory, coreOverride), storyClient, storyClient
+    );
+    server.start();
+    HttpClient client = HttpClient.newHttpClient();
+    String sessionId = createSession(client);
+    HttpResponse<String> stored = replaceGraph(client, sessionId, AUTHORITATIVE_GRAPH);
+
+    HttpResponse<String> off = patchConfig(client, sessionId, "{\"graphEnabled\":false}");
+    HttpResponse<String> offTurn = submitTurn(client, sessionId, "What does Alice carry?");
+    HttpResponse<String> on = patchConfig(client, sessionId, "{\"graphEnabled\":true}");
+    HttpResponse<String> onTurn = submitTurn(client, sessionId, "What does Alice carry?");
+
+    assertEquals(200, stored.statusCode());
+    assertEquals(200, offTurn.statusCode());
+    assertEquals(200, onTurn.statusCode());
+    assertFalse(JsonSupport.OBJECT_MAPPER.readTree(off.body()).path("effectiveGraphEnabled").asBoolean(),
+      "An explicit per-session off must be reported effective while the core switch stays on");
+    assertTrue(JsonSupport.OBJECT_MAPPER.readTree(on.body()).path("effectiveGraphEnabled").asBoolean(),
+      "Re-enabling per session must be reported effective again");
+    assertFalse(storyClient.requests().get(0).getFirst().content().contains(GRAPH_FACTS_HEADER),
+      "A per-session off choice must not ground the story prompt even with an authoritative graph stored");
+    assertTrue(storyClient.requests().get(1).getFirst().content().contains(GRAPH_FACTS_HEADER),
+      "Turning the toggle back on grounds the story prompt again");
   }
 
   @Test
@@ -269,6 +399,9 @@ class ApiServerTest {
     assertEquals(200, settings.statusCode());
     assertTrue(settings.body().contains("Story settings"));
     assertTrue(settings.body().contains("Knowledge graph (JSON)"));
+    assertTrue(settings.body().contains("id=\"graphEnabled\""));
+    assertTrue(java.util.regex.Pattern.compile("<input[^>]*id=\"graphEnabled\"[^>]*checked").matcher(settings.body()).find(),
+      "A fresh session should render the knowledge graph toggle checked because it inherits the enabled core default");
     assertTrue(settings.body().contains("formaction=\"/story/settings/graph/generate-empty\""));
     assertTrue(settings.body().contains("Generate empty"));
     assertTrue(settings.body().contains("formaction=\"/story/settings/graph/fill-fixed-protagonists\""));
@@ -658,6 +791,38 @@ class ApiServerTest {
       HttpRequest.newBuilder(uri("/v1/sessions/" + sessionId + "/turns"))
         .header("Content-Type", "application/json")
         .POST(HttpRequest.BodyPublishers.ofString("{\"prompt\":\"" + prompt + "\"}"))
+        .build(),
+      HttpResponse.BodyHandlers.ofString()
+    );
+  }
+
+  private String createSession(HttpClient client) throws Exception {
+    HttpResponse<String> created = client.send(
+      HttpRequest.newBuilder(uri("/v1/sessions"))
+        .header("Content-Type", "application/json")
+        .POST(HttpRequest.BodyPublishers.ofString("{}"))
+        .build(),
+      HttpResponse.BodyHandlers.ofString()
+    );
+    assertEquals(201, created.statusCode());
+    return JsonSupport.OBJECT_MAPPER.readTree(created.body()).path("sessionId").asText();
+  }
+
+  private HttpResponse<String> replaceGraph(HttpClient client, String sessionId, String graph) throws Exception {
+    return client.send(
+      HttpRequest.newBuilder(uri("/v1/sessions/" + sessionId + "/graph"))
+        .header("Content-Type", "application/json")
+        .PUT(HttpRequest.BodyPublishers.ofString(graph))
+        .build(),
+      HttpResponse.BodyHandlers.ofString()
+    );
+  }
+
+  private HttpResponse<String> patchConfig(HttpClient client, String sessionId, String json) throws Exception {
+    return client.send(
+      HttpRequest.newBuilder(uri("/v1/sessions/" + sessionId + "/config"))
+        .header("Content-Type", "application/json")
+        .method("PATCH", HttpRequest.BodyPublishers.ofString(json))
         .build(),
       HttpResponse.BodyHandlers.ofString()
     );

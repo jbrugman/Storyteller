@@ -3,6 +3,7 @@
 @param StorySettingsPage page
 @param boolean streamingEnabled = false
 @param boolean validationEnabled = true
+@param boolean graphEnabled = true
 
 <!doctype html>
 <html lang="en">
@@ -61,6 +62,15 @@
         <label for="rules">Rules</label>
         <textarea id="rules" name="rules" rows="12" maxlength="1000000"
                   required>${page.prompts().rules()}</textarea>
+
+        <fieldset>
+          <legend>Knowledge graph</legend>
+          <label><input type="checkbox" id="graphEnabled" name="graphEnabled" checked="${graphEnabled}"> Use the knowledge graph</label>
+          <p class="setting-hint">When on, facts from the graph below ground story generation and validation, and each turn
+            updates the graph automatically. Manual graph tools below always stay available. When off, the story ignores the
+            graph and stops updating it; stored facts are kept. Defaults to the server's graph.enabled setting and is saved
+            per session in the database.</p>
+        </fieldset>
 
         <label for="knowledgeGraph">Knowledge graph (JSON)</label>
         @if(page.hasKnowledgeGraphError())

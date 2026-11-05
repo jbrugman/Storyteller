@@ -127,7 +127,8 @@ public final class ApiServer implements AutoCloseable {
     );
     SessionController sessionController = new SessionController(sessionService, cookieService);
     JdbcStoryRepository storyRepository = new JdbcStoryRepository(database);
-    KnowledgeGraphValidator graphValidator = new KnowledgeGraphValidator(PredicateCatalog.load(coreConfig.baseDir()));
+    PredicateCatalog graphPredicates = PredicateCatalog.load(coreConfig.baseDir());
+    KnowledgeGraphValidator graphValidator = new KnowledgeGraphValidator(graphPredicates);
     JdbcSessionMemoryRepository memoryRepository = new JdbcSessionMemoryRepository(database);
     SessionMemoryService memoryService = new SessionMemoryService(
       memoryRepository, settingsRepository, coreConfig, backgroundClient
@@ -141,7 +142,7 @@ public final class ApiServer implements AutoCloseable {
     );
     StoryTurnService storyTurnService = new StoryTurnService(
       storyRepository, settingsRepository, memoryRepository, derivedStateService,
-      coreConfig, chatClient, validationClient
+      coreConfig, chatClient, validationClient, graphValidator, graphPredicates
     );
     SessionBundleService bundleService = new SessionBundleService(
       new JdbcSessionBundleRepository(database), config.sessionInactivityTimeout(), defaultPrompts
@@ -152,7 +153,7 @@ public final class ApiServer implements AutoCloseable {
       sessionService, cookieService, bundleService
     );
     SessionSettingsService settingsService = new SessionSettingsService(settingsRepository, graphValidator,
-      coreConfig.streamingEnabled(), coreConfig.validationEnabled());
+      coreConfig.streamingEnabled(), coreConfig.validationEnabled(), coreConfig.graphEnabled());
     var atlasService = new SessionAtlasService(
       settingsService, PredicateCatalog.load(coreConfig.baseDir())
     );
