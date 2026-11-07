@@ -24,7 +24,7 @@ npm run dev
 ```
 
 Open http://localhost:5173. Vite proxies `/v1` to `http://localhost:7090`, so browser requests and the session cookie use the frontend origin. 
-No backend CORS changes are needed. If the backend uses another address, change `server.proxy` in `vite.config.ts`.
+If the development backend uses another address, change `proxy` in `vite.config.ts`.
 
 The backend needs its normal model and database configuration; this example does not contain a mock model. 
 Sending a prompt invokes the configured model.
@@ -93,9 +93,24 @@ Start with [React Quick Start](https://react.dev/learn), then [Thinking in React
 npm run build
 ```
 
-This checks TypeScript and creates `dist/`. This example is separate from Maven; Maven does not build it. 
-`npm run preview` previews the built assets, but does not provide the development API proxy.
-For a deployed build, serve `dist/` and reverse-proxy `/v1` on the same origin, or use your own backend. 
+This checks TypeScript and creates `dist/`. The example is a Maven reactor module: CI installs Node and runs
+the build and tests during `mvn verify`, while local builds leave it untouched.
+Run the compiled build independently of Vite:
+
+```sh
+npx serve dist
+```
+
+Open `http://localhost:3000` with the API running on `http://localhost:7090`.
+The build calls that API directly for requests, streaming, images and exports. The API allows
+credentialed HTTP requests from `localhost` and `127.0.0.1` on any port. When opened via
+`127.0.0.1`, the default build also uses `127.0.0.1:7090` to keep session cookies on the same host.
+Restart the API after building a backend that includes this CORS support.
+
+To build against another API origin, set `VITE_API_BASE_URL` when building, for example
+`VITE_API_BASE_URL=https://api.example.com npm run build`. That API must allow the frontend origin
+and support its session cookies. Set `VITE_API_BASE_URL=''` for an existing same-origin deployment. 
+
 Opening `dist/index.html` directly is not a deployment.
 
 The tests under `tests/` run the real TypeScript sources through Node's built-in test runner, so a failing test means production behaviour broke:

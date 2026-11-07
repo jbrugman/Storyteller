@@ -179,6 +179,20 @@ public final class ApiServer implements AutoCloseable {
     ApiTlsMaterial tlsMaterial = config.tls().enabled() ? ApiTlsMaterial.prepare(config.tls()) : null;
     Javalin server = Javalin.create(javalinConfig -> {
       javalinConfig.startup.showJavalinBanner = false;
+      // Keep the bundled same-origin UI working alongside the separately served React build.
+      javalinConfig.routes.before("/v1/*", context -> {
+        String origin = context.header("Origin");
+        String sameOrigin = context.scheme() + "://" + context.host();
+        if (origin != null && !origin.matches("http://(localhost|127\\.0\\.0\\.1)(:[0-9]{1,5})?") && !origin.equals(sameOrigin)) {
+          throw new io.javalin.http.ForbiddenResponse("Origin is not allowed.");
+        }
+      });
+      javalinConfig.bundledPlugins.enableCors(cors -> cors.addRule(rule -> {
+        rule.path = "/v1/*";
+        // The preceding origin check restricts reflection to loopback and same-origin requests.
+        rule.reflectClientOrigin = true;
+        rule.allowCredentials = true;
+      }));
       if (tlsMaterial != null) {
         javalinConfig.registerPlugin(new SslPlugin(ssl -> {
           ssl.host = config.host();

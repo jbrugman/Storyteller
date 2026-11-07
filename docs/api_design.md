@@ -197,8 +197,9 @@ The public API exposes the same operations as the bundled web interface. Respons
 These JSON endpoints are independent of the JTE templates. Routes containing `{sessionId}` resolve the session by
 the path ID and do not require an active-session cookie, matching the existing turns endpoint. The cookie is needed
 only to resolve `GET /v1/session`. A session ID acts as access to that session; there is no user-account authorization
-layer. Browser clients can use the API on the same origin or through their own backend. Cross-origin browser access
-is not enabled by default.
+layer. Browser clients can use the API on the same origin or through their own backend. Cross-origin browser access is
+enabled for `http://localhost` and `http://127.0.0.1` on any port, including the session cookie, so a separately
+served React build needs no reverse proxy. Any other origin receives `403` and must use a same-origin reverse proxy.
 
 ### History
 

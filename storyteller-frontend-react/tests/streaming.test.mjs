@@ -2,10 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
-import ts from 'typescript';
-const apiSource = await readFile(new URL('../src/api.ts', import.meta.url), 'utf8');
-const compiled = ts.transpileModule(apiSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } });
-const { api } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputText).toString('base64'));
+import { loadModule } from './helpers/modules.mjs';
+const { api } = loadModule('api');
 
 const source = await readFile(new URL('../../storyteller-api/src/main/resources/public/story-stream.js', import.meta.url), 'utf8');
 const frame = (event, value) => `event: ${event}\ndata: ${JSON.stringify(value)}\n\n`;

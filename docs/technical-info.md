@@ -611,6 +611,9 @@ Not yet.
   Replies now rotate through ten scenes that continue into one another and wrap from the last back to the first.
 - Added a per-session maximum response tokens setting to the HTTP API and to both interfaces. 
   The setting accepts the server default, an explicit limit, or zero for no limit.
+- The built React example calls the API directly, so a static build no longer answers its own `/v1` requests. 
+  The API now allows credentialed cross-origin requests from `localhost` and `127.0.0.1` on any port. 
+- Added missing favicon, served by the bundled interface and copied into the React build.
 
 ### 2.1.7
 - Fixed the web interface and HTTP API collecting knowledge-graph facts without using them. Previously, only the CLI used these facts to guide story generation and validation.

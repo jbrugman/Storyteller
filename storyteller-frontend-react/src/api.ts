@@ -115,13 +115,20 @@ export interface TurnOptions {
   pastMessageIndexes?: number[];
 }
 
-// Relative URLs work through Vite's development proxy or a same-origin deployment.
+// Vite embeds the API origin in dist; development uses the same-origin proxy.
+declare const __STORYTELLER_API_BASE_URL__: string;
+// Keep loopback hosts consistent so SameSite session cookies also work via 127.0.0.1.
+const apiBaseUrl = __STORYTELLER_API_BASE_URL__ === 'http://localhost:7090'
+  && globalThis.location?.hostname === '127.0.0.1'
+  ? 'http://127.0.0.1:7090' : __STORYTELLER_API_BASE_URL__;
+const apiUrl = (path: string) => `${apiBaseUrl.replace(/\/+$/, '')}/v1${path}`;
+
 // A string body is sent unchanged so raw JSON, such as a knowledge graph, is not encoded twice.
 async function request<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
   const json = body !== undefined && !(body instanceof FormData);
-  const response = await fetch(`/v1${path}`, {
+  const response = await fetch(apiUrl(path), {
     method,
-    credentials: 'same-origin',
+    credentials: 'include',
     signal,
     headers: json ? { 'Content-Type': 'application/json' } : undefined,
     body: body === undefined ? undefined
@@ -193,8 +200,8 @@ export const api = {
   fillGraph: (id: string) => request<SessionGraph>(`${sessionPath(id)}/graph/fill-fixed-protagonists`, 'POST'),
   resetGraph: (id: string) => request<SessionGraph>(`${sessionPath(id)}/graph/reset-turn-based`, 'POST'),
   // Binary endpoints stay plain URLs so the browser can load or download them itself.
-  imageUrl: (id: string, messageIndex: number) => `/v1${sessionPath(id)}/images/${messageIndex}`,
-  exportUrl: (id: string) => `/v1${sessionPath(id)}/export`,
+  imageUrl: (id: string, messageIndex: number) => apiUrl(`${sessionPath(id)}/images/${messageIndex}`),
+  exportUrl: (id: string) => apiUrl(`${sessionPath(id)}/export`),
   turn: (id: string, prompt: string, options: TurnOptions = {}) => request<{
     sessionId: string; userMessageIndex: number; assistantMessageIndex: number; response: string;
   }>(`${sessionPath(id)}/turns`, 'POST',
@@ -204,8 +211,8 @@ export const api = {
     options.signal),
   streamTurn: async (id: string, prompt: string, onText: (text: string) => void, options: TurnOptions = {}) => {
     const form = options.image ? turnForm(prompt, options.image, options.pastMessageIndexes) : null;
-    const response = await fetch(`/v1${sessionPath(id)}/turns/stream`, {
-      method: 'POST', credentials: 'same-origin', signal: options.signal,
+    const response = await fetch(apiUrl(`${sessionPath(id)}/turns/stream`), {
+      method: 'POST', credentials: 'include', signal: options.signal,
       headers: form ? undefined : { 'Content-Type': 'application/json' },
       body: form ?? JSON.stringify({ prompt, pastMessageIndexes: options.pastMessageIndexes ?? [] }),
     });

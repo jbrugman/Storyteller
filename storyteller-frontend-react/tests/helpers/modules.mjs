@@ -22,19 +22,20 @@ function resolvePath(name) {
   throw new Error(`Unknown module: ${name}`);
 }
 
-export function loadModule(name) {
-  if (cache.has(name)) return cache.get(name);
+export function loadModule(name, apiBaseUrl) {
+  const useCache = apiBaseUrl === undefined;
+  if (useCache && cache.has(name)) return cache.get(name);
   const output = ts.transpileModule(resolvePath(name), {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
   }).outputText;
   const module = { exports: {} };
   // Cache before evaluating so modules that import each other do not recurse.
-  cache.set(name, module.exports);
+  if (useCache) cache.set(name, module.exports);
   const localRequire = specifier =>
     specifier.startsWith('./') ? loadModule(specifier.slice(2)) : nodeRequire(specifier);
-  vm.runInThisContext('(function (exports, module, require) {"use strict";' + output + '})')
-    (module.exports, module, localRequire);
-  cache.set(name, module.exports);
+  vm.runInThisContext('(function (exports, module, require, __STORYTELLER_API_BASE_URL__) {"use strict";' + output + '})')
+    (module.exports, module, localRequire, apiBaseUrl ?? '');
+  if (useCache) cache.set(name, module.exports);
   return module.exports;
 }
 
