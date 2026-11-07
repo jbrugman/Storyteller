@@ -36,6 +36,7 @@ public final class SessionDataController {
   private final SessionAtlasService atlasService;
   private final SessionKnowledgeGraphService graphService;
   private final Double defaultTemperature;
+  private final int defaultMaxTokens;
   private final KnowledgeGraphJsonCodec graphCodec = new KnowledgeGraphJsonCodec();
 
   public SessionDataController(
@@ -46,7 +47,8 @@ public final class SessionDataController {
     SessionMemoryService memoryService,
     SessionKnowledgeGraphService graphService,
     SessionAtlasService atlasService,
-    Double defaultTemperature
+    Double defaultTemperature,
+    int defaultMaxTokens
   ) {
     this.sessionService = sessionService;
     this.storyService = storyService;
@@ -56,6 +58,7 @@ public final class SessionDataController {
     this.atlasService = atlasService;
     this.graphService = graphService;
     this.defaultTemperature = defaultTemperature;
+    this.defaultMaxTokens = defaultMaxTokens;
   }
 
   public void register(JavalinConfig config) {
@@ -132,7 +135,8 @@ public final class SessionDataController {
       patchedTemperature(patch.temperature()),
       patch.streamingEnabled() != null, patchedBoolean(patch.streamingEnabled(), "streamingEnabled"),
       patch.validationEnabled() != null, patchedBoolean(patch.validationEnabled(), "validationEnabled"),
-      patch.graphEnabled() != null, patchedBoolean(patch.graphEnabled(), "graphEnabled")
+      patch.graphEnabled() != null, patchedBoolean(patch.graphEnabled(), "graphEnabled"),
+      patch.maxTokens() != null, patchedMaxTokens(patch.maxTokens())
     );
     context.json(configurationResponse(sessionId, settingsService.load(sessionId)));
   }
@@ -248,7 +252,9 @@ public final class SessionDataController {
       settings.temperature() != null ? settings.temperature() : defaultTemperature,
       settings.streamingEnabled(), settings.validationEnabled(), settings.graphEnabled(),
       settingsService.streamingEnabled(settings), settingsService.validationEnabled(settings),
-      settingsService.graphEnabled(settings)
+      settingsService.graphEnabled(settings),
+      settings.maxTokens(),
+      settings.maxTokens() != null ? settings.maxTokens() : defaultMaxTokens
     );
   }
 
@@ -292,5 +298,16 @@ public final class SessionDataController {
       throw new IllegalArgumentException("temperature must be a number between 0 and 2, or null.");
     }
     return value.doubleValue();
+  }
+
+  private Integer patchedMaxTokens(JsonNode value) {
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isNumber() || !Double.isFinite(value.doubleValue())
+      || value.doubleValue() != Math.rint(value.doubleValue())) {
+      throw new IllegalArgumentException("maxTokens must be a whole number, 0 for no limit, or null.");
+    }
+    return value.intValue();
   }
 }

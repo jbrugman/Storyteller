@@ -9,11 +9,14 @@ import java.util.Map;
 
 public final class JdbcSessionSettingsRepository implements SessionSettingsRepository {
   private static final String SELECT_SESSION_CONFIGURATION = """
-    SELECT temperature, streaming_enabled, validation_enabled, graph_enabled
+    SELECT temperature, streaming_enabled, validation_enabled, graph_enabled, max_tokens
       FROM session_configuration WHERE session_id = ?
     """;
   private static final String UPDATE_SESSION_CONFIGURATION_TEMPERATURE = """
     UPDATE session_configuration SET temperature = ? WHERE session_id = ?
+    """;
+  private static final String UPDATE_SESSION_CONFIGURATION_MAX_TOKENS = """
+    UPDATE session_configuration SET max_tokens = ? WHERE session_id = ?
     """;
 
   private final Database database;
@@ -36,7 +39,7 @@ public final class JdbcSessionSettingsRepository implements SessionSettingsRepos
           BigDecimal temperature = rows.getBigDecimal("temperature");
           return new SessionSettings(prompts, graph, temperature == null ? null : temperature.doubleValue(),
             rows.getObject("streaming_enabled", Boolean.class), rows.getObject("validation_enabled", Boolean.class),
-            rows.getObject("graph_enabled", Boolean.class));
+            rows.getObject("graph_enabled", Boolean.class), rows.getObject("max_tokens", Integer.class));
         }
       }
     } catch (SQLException ex) {
@@ -78,6 +81,14 @@ public final class JdbcSessionSettingsRepository implements SessionSettingsRepos
   public void patchConfiguration(String sessionId, Map<String, String> prompts, boolean updateTemperature,
     Double temperature, boolean updateGeneration, Boolean streamingEnabled, Boolean validationEnabled,
     boolean updateGraph, Boolean graphEnabled) {
+    patchConfiguration(sessionId, prompts, updateTemperature, temperature, updateGeneration, streamingEnabled,
+      validationEnabled, updateGraph, graphEnabled, false, null);
+  }
+
+  @Override
+  public void patchConfiguration(String sessionId, Map<String, String> prompts, boolean updateTemperature,
+    Double temperature, boolean updateGeneration, Boolean streamingEnabled, Boolean validationEnabled,
+    boolean updateGraph, Boolean graphEnabled, boolean updateMaxTokens, Integer maxTokens) {
     if (Boolean.TRUE.equals(streamingEnabled) && Boolean.TRUE.equals(validationEnabled)) {
       throw new IllegalArgumentException("Streaming and validation cannot both be enabled.");
     }
@@ -92,6 +103,9 @@ public final class JdbcSessionSettingsRepository implements SessionSettingsRepos
         }
         if (updateGeneration || updateGraph) {
           updateGeneration(connection, sessionId, streamingEnabled, validationEnabled, graphEnabled);
+        }
+        if (updateMaxTokens) {
+          updateMaxTokensInTransaction(connection, sessionId, maxTokens);
         }
         connection.commit();
       } catch (SQLException ex) {
@@ -140,6 +154,7 @@ public final class JdbcSessionSettingsRepository implements SessionSettingsRepos
       updateTemperatureInTransaction(connection, sessionId, settings.temperature());
       updateGeneration(connection, sessionId, settings.streamingEnabled(), settings.validationEnabled(),
         settings.graphEnabled());
+      updateMaxTokensInTransaction(connection, sessionId, settings.maxTokens());
       connection.commit();
     } catch (SQLException ex) {
       rollback(connection, ex);
@@ -152,6 +167,19 @@ public final class JdbcSessionSettingsRepository implements SessionSettingsRepos
     try (PreparedStatement statement = connection.prepareStatement(UPDATE_SESSION_CONFIGURATION_TEMPERATURE)) {
       BigDecimal bd = temperature != null ? BigDecimal.valueOf(temperature) : null;
       statement.setBigDecimal(1, bd);
+      statement.setString(2, sessionId);
+      requireUpdated(statement, "Session configuration does not exist: " + sessionId);
+    }
+  }
+
+  private void updateMaxTokensInTransaction(Connection connection, String sessionId, Integer maxTokens)
+    throws SQLException {
+    try (PreparedStatement statement = connection.prepareStatement(UPDATE_SESSION_CONFIGURATION_MAX_TOKENS)) {
+      if (maxTokens == null) {
+        statement.setNull(1, java.sql.Types.INTEGER);
+      } else {
+        statement.setInt(1, maxTokens);
+      }
       statement.setString(2, sessionId);
       requireUpdated(statement, "Session configuration does not exist: " + sessionId);
     }

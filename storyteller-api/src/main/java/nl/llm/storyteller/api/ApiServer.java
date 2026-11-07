@@ -112,6 +112,8 @@ public final class ApiServer implements AutoCloseable {
     promptRepository.initializeMissing(defaultPrompts);
     JdbcSessionSettingsRepository settingsRepository = new JdbcSessionSettingsRepository(database);
     Double defaultTemperature = (Double) coreConfig.chatOptions().get("temperature");
+    Integer configuredMaxTokens = (Integer) coreConfig.chatOptions().get("max_tokens");
+    int defaultMaxTokens = configuredMaxTokens != null ? configuredMaxTokens : 0;
     SessionService sessionService = new SessionService(
       new JdbcSessionRepository(database),
       settingsRepository,
@@ -158,7 +160,8 @@ public final class ApiServer implements AutoCloseable {
       settingsService, PredicateCatalog.load(coreConfig.baseDir())
     );
     SessionDataController sessionDataController = new SessionDataController(
-      sessionService, storyService, storyTurnService, settingsService, memoryService, knowledgeGraphService, atlasService, defaultTemperature
+      sessionService, storyService, storyTurnService, settingsService, memoryService, knowledgeGraphService, atlasService, defaultTemperature,
+      defaultMaxTokens
     );
     WebController webController = new WebController(
       sessionService,
@@ -170,11 +173,26 @@ public final class ApiServer implements AutoCloseable {
       memoryService,
       knowledgeGraphService,
       atlasService,
-      defaultTemperature
+      defaultTemperature,
+      defaultMaxTokens
     );
     ApiTlsMaterial tlsMaterial = config.tls().enabled() ? ApiTlsMaterial.prepare(config.tls()) : null;
     Javalin server = Javalin.create(javalinConfig -> {
       javalinConfig.startup.showJavalinBanner = false;
+      // Keep the bundled same-origin UI working alongside the separately served React build.
+      javalinConfig.routes.before("/v1/*", context -> {
+        String origin = context.header("Origin");
+        String sameOrigin = context.scheme() + "://" + context.host();
+        if (origin != null && !origin.matches("http://(localhost|127\\.0\\.0\\.1)(:[0-9]{1,5})?") && !origin.equals(sameOrigin)) {
+          throw new io.javalin.http.ForbiddenResponse("Origin is not allowed.");
+        }
+      });
+      javalinConfig.bundledPlugins.enableCors(cors -> cors.addRule(rule -> {
+        rule.path = "/v1/*";
+        // The preceding origin check restricts reflection to loopback and same-origin requests.
+        rule.reflectClientOrigin = true;
+        rule.allowCredentials = true;
+      }));
       if (tlsMaterial != null) {
         javalinConfig.registerPlugin(new SslPlugin(ssl -> {
           ssl.host = config.host();

@@ -67,6 +67,38 @@ class SessionDataApiTest {
   }
 
   @Test
+  @DisplayName("""
+    Given a server response limit and a per-session override,
+    When turns are submitted,
+    Then the session cap, the explicit limit-free choice and the inherited server limit reach the model
+    """)
+  void shouldApplyPerSessionMaxTokensToNextTurn() throws Exception {
+    startSession("chat.maxTokens=256\n");
+    JsonNode original = json(request("GET", "/config", null));
+    assertTrue(original.path("maxTokens").isNull(), "A fresh session inherits the server limit");
+    assertEquals(256, original.path("effectiveMaxTokens").asInt());
+    assertEquals(200, request("POST", "/turns", "{\"prompt\":\"Hello\"}").statusCode());
+    assertEquals(256, chatOptions.get().get("max_tokens"), "The server default caps the turn");
+
+    assertEquals(200, request("PATCH", "/config", "{\"maxTokens\":64}").statusCode());
+    assertEquals(200, request("POST", "/turns", "{\"prompt\":\"Continue\"}").statusCode());
+    assertEquals(64, chatOptions.get().get("max_tokens"), "The session cap overrides the server default");
+
+    JsonNode unlimited = json(request("PATCH", "/config", "{\"maxTokens\":0}"));
+    assertEquals(0, unlimited.path("maxTokens").asInt(), "Zero persists as an explicit choice");
+    assertEquals(0, unlimited.path("effectiveMaxTokens").asInt(), "Zero resolves to no limit");
+    assertEquals(200, request("POST", "/turns", "{\"prompt\":\"Finish\"}").statusCode());
+    assertFalse(chatOptions.get().containsKey("max_tokens"),
+      "Zero sends no limit at all, even when the server config caps responses");
+
+    JsonNode restored = json(request("PATCH", "/config", "{\"maxTokens\":null}"));
+    assertTrue(restored.path("maxTokens").isNull());
+    assertEquals(256, restored.path("effectiveMaxTokens").asInt(), "Null returns to the server limit");
+    assertEquals(200, request("POST", "/turns", "{\"prompt\":\"Once more\"}").statusCode());
+    assertEquals(256, chatOptions.get().get("max_tokens"), "The inherited server limit caps the turn again");
+  }
+
+  @Test
   @DisplayName("Given persisted turns, when history is read and undo is requested, then the latest exchange is removed without a model call")
   void shouldReadHistoryAndUndoWithoutModelInvocation() throws Exception {
     startSession();
@@ -196,6 +228,8 @@ class SessionDataApiTest {
       "", "null", "[]", "{", "{} {}", "{\"unknown\":true}",
       "{\"temperature\":-0.1}", "{\"temperature\":2.1}", "{\"temperature\":\"0.5\"}",
       "{\"temperature\":true}", "{\"rules\":null}", "{\"systemPrompt\":0}",
+      "{\"maxTokens\":-1}", "{\"maxTokens\":1000001}", "{\"maxTokens\":\"512\"}",
+      "{\"maxTokens\":true}", "{\"maxTokens\":1.5}",
       "{\"rules\":\"  \"}", "{\"systemPrompt\":\"Changed\",\"fixedProtagonists\":\"invalid yaml\"}"
     )) {
       HttpResponse<String> response = request("PATCH", "/config", patch);

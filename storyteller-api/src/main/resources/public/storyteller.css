@@ -796,17 +796,23 @@ textarea {
 }
 
 /* Temperature slider */
-.temperature-fieldset {
+.temperature-fieldset,
+.max-tokens-fieldset {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 1rem 1.25rem;
   margin-top: 0.5rem;
 }
 
-.temperature-fieldset > label {
+.temperature-fieldset > label,
+.max-tokens-fieldset > label {
   display: block;
   font-weight: 600;
   margin-bottom: 0.3rem;
+}
+
+.max-tokens-fieldset input[type="number"] {
+  max-width: 12rem;
 }
 
 .setting-hint {

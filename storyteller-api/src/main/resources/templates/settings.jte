@@ -4,6 +4,8 @@
 @param boolean streamingEnabled = false
 @param boolean validationEnabled = true
 @param boolean graphEnabled = true
+@param String maxTokens = ""
+@param int defaultMaxTokens = 0
 
 <!doctype html>
 <html lang="en">
@@ -112,6 +114,17 @@
               @endif
             </output>
           </div>
+        </fieldset>
+
+        <fieldset class="max-tokens-fieldset">
+          <label for="maxTokens">Maximum response tokens</label>
+          <p class="setting-hint">
+            Limits how many tokens one response may use. Leave the field empty to follow the server default shown as
+            placeholder, or enter 0 for no limit. Only a limit can stop a response mid-sentence, so lower it
+            deliberately on a smaller model. Range: 0 to 1000000. Saved per session in the database.
+          </p>
+          <input type="number" id="maxTokens" name="maxTokens" min="0" max="1000000" step="1"
+                 value="${maxTokens}" placeholder="${defaultMaxTokens}" />
         </fieldset>
 
         <div class="graph-tools" aria-label="Knowledge graph actions">

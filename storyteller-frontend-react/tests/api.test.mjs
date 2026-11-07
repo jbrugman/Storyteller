@@ -109,3 +109,46 @@ test('Without a window, When reading history, Then no query parameters are appen
   const { requests } = await capture(() => api.history('s'));
   assert.equal(requests[0].url, '/v1/sessions/s/history', 'A full read stays a plain history request');
 });
+
+
+test('Given a static build API origin, When creating and restoring a session, Then requests go directly to the API with cookies', async () => {
+  const { api: builtApi } = loadModule('api', 'http://localhost:7090/');
+  for (const [invoke, path] of [
+    [() => builtApi.createSession('Static build'), '/sessions'],
+    [() => builtApi.currentSession(), '/session'],
+    [() => builtApi.history('a/b'), '/sessions/a%2Fb/history'],
+  ]) {
+    const { requests } = await capture(invoke);
+    assert.equal(requests[0].url, 'http://localhost:7090/v1' + path);
+    assert.equal(requests[0].init.credentials, 'include');
+  }
+  assert.equal(builtApi.imageUrl('a/b', 2), 'http://localhost:7090/v1/sessions/a%2Fb/images/2');
+  assert.equal(builtApi.exportUrl('a/b'), 'http://localhost:7090/v1/sessions/a%2Fb/export');
+});
+
+test('Given a static build API origin, When streaming, Then the stream uses that origin and session cookies', async () => {
+  const { api: builtApi } = loadModule('api', 'http://localhost:7090');
+  const stream = new Response('event: done\ndata: {"response":"ok"}\n\n');
+  const { requests } = await capture(() => builtApi.streamTurn('s', 'Hello', () => {}), stream);
+  assert.equal(requests[0].url, 'http://localhost:7090/v1/sessions/s/turns/stream');
+  assert.equal(requests[0].init.credentials, 'include');
+});
+
+test('Given a same-origin deployment, When loading binary resources, Then their URLs stay relative', () => {
+  assert.equal(api.imageUrl('s', 1), '/v1/sessions/s/images/1');
+  assert.equal(api.exportUrl('s'), '/v1/sessions/s/export');
+});
+
+
+test('Given a build opened through 127.0.0.1, When calling the default API, Then the API uses that same host', async () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'location');
+  try {
+    Object.defineProperty(globalThis, 'location', { configurable: true, value: { hostname: '127.0.0.1' } });
+    const { api: builtApi } = loadModule('api', 'http://localhost:7090');
+    const { requests } = await capture(() => builtApi.currentSession());
+    assert.equal(requests[0].url, 'http://127.0.0.1:7090/v1/session');
+  } finally {
+    if (original) Object.defineProperty(globalThis, 'location', original);
+    else delete globalThis.location;
+  }
+});

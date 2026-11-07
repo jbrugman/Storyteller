@@ -146,9 +146,19 @@ public final class StoryTurnService {
     }
     java.util.Map<String, Object> options = config.chatOptions();
     Double sessionTemperature = settings.temperature();
-    if (sessionTemperature != null) {
+    Integer sessionMaxTokens = settings.maxTokens();
+    if (sessionTemperature != null || sessionMaxTokens != null) {
       options = new java.util.HashMap<>(options);
-      options.put("temperature", sessionTemperature);
+      if (sessionTemperature != null) {
+        options.put("temperature", sessionTemperature);
+      }
+      if (sessionMaxTokens != null) {
+        if (sessionMaxTokens > 0) {
+          options.put("max_tokens", sessionMaxTokens);
+        } else {
+          options.remove("max_tokens");
+        }
+      }
     }
     boolean streaming = settings.streamingEnabled(config.streamingEnabled());
     boolean validation = settings.validationEnabled(config.validationEnabled());

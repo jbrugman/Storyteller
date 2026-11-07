@@ -15,6 +15,7 @@ import static nl.llm.storyteller.api.input.TextInputNormalizer.requiredMultiline
 
 public final class SessionSettingsService {
   private static final int MAX_PROMPT_LENGTH = 1_000_000;
+  private static final int MAX_TOKENS_LIMIT = 1_000_000;
   private final SessionSettingsRepository repository;
   private final KnowledgeGraphValidator graphValidator;
   private final boolean defaultStreaming;
@@ -55,7 +56,7 @@ public final class SessionSettingsService {
     FixedProtagonistsValidator.validate(prompts.fixedProtagonists());
     SessionSettings current = repository.load(sessionId);
     repository.save(sessionId, new SessionSettings(prompts, parseKnowledgeGraph(knowledgeGraph), temperature,
-      current.streamingEnabled(), current.validationEnabled(), current.graphEnabled()));
+      current.streamingEnabled(), current.validationEnabled(), current.graphEnabled(), current.maxTokens()));
   }
 
   public boolean streamingEnabled(SessionSettings settings) {
@@ -78,15 +79,17 @@ public final class SessionSettingsService {
   }
 
   public void save(String sessionId, String systemPrompt, String fixedProtagonists, String rules,
-    String knowledgeGraph, Double temperature, Boolean streaming, Boolean validation, Boolean graph) {
+    String knowledgeGraph, Double temperature, Boolean streaming, Boolean validation, Boolean graph,
+    Integer maxTokens) {
     validateGeneration(streaming, validation);
+    validateMaxTokens(maxTokens);
     SessionPrompts prompts = new SessionPrompts(
       requiredMultiline(systemPrompt, "System prompt", MAX_PROMPT_LENGTH),
       requiredMultiline(fixedProtagonists, "Fixed protagonists", MAX_PROMPT_LENGTH),
       requiredMultiline(rules, "Rules", MAX_PROMPT_LENGTH));
     FixedProtagonistsValidator.validate(prompts.fixedProtagonists());
     repository.save(sessionId, new SessionSettings(prompts, parseKnowledgeGraph(knowledgeGraph), temperature,
-      streaming, validation, graph));
+      streaming, validation, graph, maxTokens));
   }
 
   public String formatKnowledgeGraph(SessionSettings settings) {
@@ -107,12 +110,13 @@ public final class SessionSettingsService {
     Double temperature
   ) {
     patchConfiguration(sessionId, systemPrompt, fixedProtagonists, rules, updateTemperature, temperature,
-      false, null, false, null, false, null);
+      false, null, false, null, false, null, false, null);
   }
 
   public synchronized void patchConfiguration(String sessionId, String systemPrompt, String fixedProtagonists,
     String rules, boolean updateTemperature, Double temperature, boolean updateStreaming, Boolean streaming,
-    boolean updateValidation, Boolean validation, boolean updateGraph, Boolean graph) {
+    boolean updateValidation, Boolean validation, boolean updateGraph, Boolean graph,
+    boolean updateMaxTokens, Integer maxTokens) {
     SessionSettings current = repository.load(sessionId);
     Boolean effectiveStreaming = updateStreaming ? streaming : current.streamingEnabled();
     Boolean effectiveValidation = updateValidation ? validation : current.validationEnabled();
@@ -134,9 +138,19 @@ public final class SessionSettingsService {
       && (!Double.isFinite(temperature) || temperature < 0 || temperature > 2)) {
       throw new IllegalArgumentException("temperature must be a number between 0 and 2, or null.");
     }
+    if (updateMaxTokens) {
+      validateMaxTokens(maxTokens);
+    }
     repository.patchConfiguration(sessionId, prompts, updateTemperature, temperature,
       updateStreaming || updateValidation || updateGraph, effectiveStreaming, effectiveValidation,
-      updateGraph, effectiveGraph);
+      updateGraph, effectiveGraph, updateMaxTokens, maxTokens);
+  }
+
+  private static void validateMaxTokens(Integer maxTokens) {
+    if (maxTokens != null && (maxTokens < 0 || maxTokens > MAX_TOKENS_LIMIT)) {
+      throw new IllegalArgumentException("maxTokens must be null, 0 for no limit, or a number up to "
+        + MAX_TOKENS_LIMIT + ".");
+    }
   }
 
   private KnowledgeGraphDocument parseKnowledgeGraph(String knowledgeGraph) {

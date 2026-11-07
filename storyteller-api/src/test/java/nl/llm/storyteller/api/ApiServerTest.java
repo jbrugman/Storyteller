@@ -76,6 +76,64 @@ class ApiServerTest {
     }
   }
 
+  @ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(strings = {"http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:5173"})
+  void shouldAllowStaticFrontendPreflightsAndSessionCookies(String origin) throws Exception {
+    server = ApiServer.create(config());
+    server.start();
+    HttpClient client = HttpClient.newHttpClient();
+    for (String method : List.of("POST", "PATCH", "PUT")) {
+      HttpResponse<String> preflight = client.send(
+        HttpRequest.newBuilder(uri("/v1/sessions"))
+          .header("Origin", origin)
+          .header("Access-Control-Request-Method", method)
+          .header("Access-Control-Request-Headers", "content-type")
+          .method("OPTIONS", HttpRequest.BodyPublishers.noBody()).build(),
+        HttpResponse.BodyHandlers.ofString());
+      assertEquals(200, preflight.statusCode());
+      assertEquals(origin, preflight.headers().firstValue("Access-Control-Allow-Origin").orElseThrow());
+      assertEquals("true", preflight.headers().firstValue("Access-Control-Allow-Credentials").orElseThrow());
+      assertEquals(method, preflight.headers().firstValue("Access-Control-Allow-Methods").orElseThrow());
+      assertEquals("content-type", preflight.headers().firstValue("Access-Control-Allow-Headers").orElseThrow());
+    }
+    HttpResponse<String> created = client.send(
+      HttpRequest.newBuilder(uri("/v1/sessions"))
+        .header("Origin", origin)
+        .header("Content-Type", "application/json")
+        .POST(HttpRequest.BodyPublishers.ofString("{}")).build(),
+      HttpResponse.BodyHandlers.ofString());
+    assertEquals(201, created.statusCode());
+    assertEquals(origin, created.headers().firstValue("Access-Control-Allow-Origin").orElseThrow());
+    String cookie = created.headers().firstValue("Set-Cookie").orElseThrow().split(";", 2)[0];
+    HttpResponse<String> restored = client.send(
+      HttpRequest.newBuilder(uri("/v1/session"))
+        .header("Origin", origin).header("Cookie", cookie).GET().build(),
+      HttpResponse.BodyHandlers.ofString());
+    assertEquals(200, restored.statusCode());
+    assertEquals("true", restored.headers().firstValue("Access-Control-Allow-Credentials").orElseThrow());
+    assertEquals(JsonSupport.OBJECT_MAPPER.readTree(created.body()).path("sessionId"),
+      JsonSupport.OBJECT_MAPPER.readTree(restored.body()).path("sessionId"));
+  }
+
+  @ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(strings = {"http://untrusted.example", "http://localhost.evil.example:3000", "http://127.0.0.1.evil.example:3000"})
+  void shouldPreserveSameOriginRequestsAndRejectOtherOrigins(String rejectedOrigin) throws Exception {
+    server = ApiServer.create(config());
+    server.start();
+    HttpClient client = HttpClient.newHttpClient();
+    HttpResponse<String> sameOrigin = client.send(
+      HttpRequest.newBuilder(uri("/v1/sessions"))
+        .header("Origin", uri("").toString()).header("Content-Type", "application/json")
+        .POST(HttpRequest.BodyPublishers.ofString("{}")).build(), HttpResponse.BodyHandlers.ofString());
+    assertEquals(201, sameOrigin.statusCode());
+    HttpResponse<String> rejected = client.send(
+      HttpRequest.newBuilder(uri("/v1/sessions"))
+        .header("Origin", rejectedOrigin).header("Content-Type", "application/json")
+        .POST(HttpRequest.BodyPublishers.ofString("{}")).build(), HttpResponse.BodyHandlers.ofString());
+    assertEquals(403, rejected.statusCode());
+    assertTrue(rejected.headers().firstValue("Access-Control-Allow-Origin").isEmpty());
+  }
+
   @Test
   @DisplayName("""
     Given a running Storyteller API,

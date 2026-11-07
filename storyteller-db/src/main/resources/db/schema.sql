@@ -16,6 +16,7 @@ CREATE TABLE session_configuration (
   validation_enabled BOOLEAN,
   streaming_enabled BOOLEAN,
   graph_enabled BOOLEAN,
+  max_tokens INTEGER,
   PRIMARY KEY (session_id),
   FOREIGN KEY (session_id) REFERENCES story_session (session_id) ON DELETE CASCADE
 );

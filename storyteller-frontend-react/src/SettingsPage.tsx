@@ -4,7 +4,7 @@ import type { Theme } from './theme';
 import { graphHasData } from './knowledge-graph';
 import type { GraphAction } from './knowledge-graph';
 
-export type EditableSettings = Pick<SessionConfig, 'systemPrompt' | 'fixedProtagonists' | 'rules' | 'temperature' | 'streamingEnabled' | 'validationEnabled' | 'graphEnabled'>;
+export type EditableSettings = Pick<SessionConfig, 'systemPrompt' | 'fixedProtagonists' | 'rules' | 'temperature' | 'streamingEnabled' | 'validationEnabled' | 'graphEnabled' | 'maxTokens'>;
 interface Props {
   config: SessionConfig;
   busy: boolean;
@@ -33,8 +33,11 @@ export default function SettingsPage({ config, busy, theme, graphText, onGraphTe
   const [graphEnabled, setGraphEnabled] = useState(config.effectiveGraphEnabled);
   const [useDefault, setUseDefault] = useState(config.temperature === null);
   const [temperature, setTemperature] = useState(config.temperature ?? config.effectiveTemperature ?? 1);
+  const [useDefaultTokens, setUseDefaultTokens] = useState(config.maxTokens === null);
+  const [maxTokens, setMaxTokens] = useState(config.maxTokens ?? config.effectiveMaxTokens ?? 0);
   const currentSettings = (): EditableSettings => ({
     systemPrompt, fixedProtagonists, rules, temperature: useDefault ? null : temperature, streamingEnabled, validationEnabled, graphEnabled,
+    maxTokens: useDefaultTokens ? null : maxTokens,
   });
   const runGraphAction = (action: GraphAction) => {
     if (!graphHasData(graphText) || window.confirm(graphWarnings[action])) onGraphAction(action, currentSettings());
@@ -99,6 +102,14 @@ export default function SettingsPage({ config, busy, theme, graphText, onGraphTe
             disabled={useDefault} onChange={event => setTemperature(Number(event.target.value))} />
           <output htmlFor="temperature">{useDefault ? 'default' : temperature.toFixed(2)}</output>
         </div>
+      </fieldset>
+      <fieldset className="max-tokens-fieldset" disabled={busy}>
+        <label htmlFor="maxTokens">Maximum response tokens</label>
+        <p className="setting-hint">Limits how many tokens one response may use. Only a limit can stop a response mid-sentence, so lower it deliberately on a smaller model. 0 means no limit. Range: 0 to 1000000.</p>
+        <label className="example-default"><input type="checkbox" checked={useDefaultTokens}
+          onChange={event => setUseDefaultTokens(event.target.checked)} />Use server default</label>
+        <input type="number" id="maxTokens" min={0} max={1000000} step={1} value={maxTokens}
+          disabled={useDefaultTokens} onChange={event => setMaxTokens(Number(event.target.value))} />
       </fieldset>
       <div className="graph-tools" aria-label="Knowledge graph actions">
         <span>Graph tools</span>

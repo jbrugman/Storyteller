@@ -1,27 +1,8 @@
 (() => {
   // Demo state stays in this tab and is separate from real Storyteller sessions.
   const stateKey = "storyteller_wireframe_story";
-  const demoReply = `The last light of evening slipped across the terrace of the beach house at L’Horizon. Valerie Thorne sat barefoot with a mug between her hands, listening to the waves instead of the roar of an audience. Somewhere beyond the gardens, the studio lights were still on.
-
-“You escaped,” Merel said, dropping into the chair beside her.
-
-“Strategic retreat,” Valerie corrected. “Very different. Much better branding.”
-
-Roos appeared in the doorway carrying three bowls. “Good. Your strategic retreat can help with dinner.”
-
-Valerie eyed the bowls. “Is this a meal or a percussion experiment?”
-
-“Keep talking and you’ll find out.”
-
-Their laughter settled into the sheltered warmth of the terrace. For a moment, Valerie watched the sea without smiling. Tomorrow there would be rehearsals, decisions, and a room full of people waiting for the frontwoman of The Eclipse to know exactly what came next.
-
-Merel nudged her foot beneath the table. “You know you don’t have to give us a performance.”
-
-Valerie glanced at her, a joke already forming. Then she let it go.
-
-“I know,” she said quietly.
-
-Roos put a bowl into her hands. The sea breeze smelled of salt, dinner was warm, and neither of her friends seemed to need anything more from her.`;
+  // Demo replies come from the rotating scenes in demo-data.js and wrap around.
+  const demoScenes = window.StorytellerDemoData?.demoScenes ?? [];
   let state = { title: "Demo story", exchanges: [] };
   try {
     const stored = JSON.parse(sessionStorage.getItem(stateKey));
@@ -52,6 +33,11 @@ Roos put a bowl into her hands. The sea breeze smelled of salt, dinner was warm,
     document.getElementById("temperature").value = data.temperature;
     document.getElementById("temperatureValue").value = data.temperature.toFixed(2);
   }
+
+  const streaming = document.getElementById("streamingEnabled");
+  const validation = document.getElementById("validationEnabled");
+  streaming?.addEventListener("change", () => { if (streaming.checked) validation.checked = false; });
+  validation?.addEventListener("change", () => { if (validation.checked) streaming.checked = false; });
   const temperature = document.getElementById("temperature");
   temperature?.addEventListener("input", () => {
     document.getElementById("temperatureValue").value = Number(temperature.value).toFixed(2);
@@ -73,7 +59,7 @@ Roos put a bowl into her hands. The sea breeze smelled of salt, dinner was warm,
       state.exchanges.forEach((exchange, index) => {
         const article = document.createElement("article");
         article.className = "exchange";
-        for (const [role, content] of [["Prompt", exchange.prompt], ["Response", demoReply]]) {
+        for (const [role, content] of [["Prompt", exchange.prompt], ["Response", demoScenes[index % demoScenes.length] ?? ""]]) {
           const column = document.createElement("div");
           column.className = `exchange-${role.toLowerCase()}`;
           const label = document.createElement("p");

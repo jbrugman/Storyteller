@@ -602,6 +602,19 @@ Not yet.
 ```
 
 ## Changelog
+### 2.1.8
+- Kept the static wireframe aligned with the built-in interface. Its settings page now shows the Response generation (streaming and validation) 
+  and the Knowledge graph option, matching the production template, its order and its default choices.
+- Added the React front-end to the Maven build as a reactor module. It installs a pinned Node version and runs the
+  front-end type check production build and tests during `mvn verify`. 
+- The wireframe demo no longer answers every prompt with the same scene. 
+  Replies now rotate through ten scenes that continue into one another and wrap from the last back to the first.
+- Added a per-session maximum response tokens setting to the HTTP API and to both interfaces. 
+  The setting accepts the server default, an explicit limit, or zero for no limit.
+- The built React example calls the API directly, so a static build no longer answers its own `/v1` requests. 
+  The API now allows credentialed cross-origin requests from `localhost` and `127.0.0.1` on any port. 
+- Added missing favicon, served by the bundled interface and copied into the React build.
+
 ### 2.1.7
 - Fixed the web interface and HTTP API collecting knowledge-graph facts without using them. Previously, only the CLI used these facts to guide story generation and validation.
 - Story prompts now include relevant facts about entities mentioned in the user’s prompt. Validation prompts also include facts about entities mentioned in the draft response.

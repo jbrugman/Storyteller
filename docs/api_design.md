@@ -175,7 +175,7 @@ The public API exposes the same operations as the bundled web interface. Respons
 | `POST` | `/v1/sessions/{sessionId}/turns` | Submit a story turn and return the generated reply. |
 | `POST` | `/v1/sessions/{sessionId}/messages/{messageIndex}/edit` | Edit an existing assistant response. |
 | `GET` | `/v1/sessions/{sessionId}/history` | Read the complete ordered message history. |
-| `GET` | `/v1/sessions/{sessionId}/config` | Read editable prompts and the session temperature. |
+| `GET` | `/v1/sessions/{sessionId}/config` | Read editable prompts, the session temperature and the response token limit. |
 | `PATCH` | `/v1/sessions/{sessionId}/config` | Update only the supplied configuration fields. |
 | `POST` | `/v1/sessions/{sessionId}/undo` | Undo the latest persisted exchange. |
 | `GET` | `/v1/sessions/{sessionId}/atlas` | Read named graph entries and readable, directed facts with statuses and sources. |
@@ -197,8 +197,9 @@ The public API exposes the same operations as the bundled web interface. Respons
 These JSON endpoints are independent of the JTE templates. Routes containing `{sessionId}` resolve the session by
 the path ID and do not require an active-session cookie, matching the existing turns endpoint. The cookie is needed
 only to resolve `GET /v1/session`. A session ID acts as access to that session; there is no user-account authorization
-layer. Browser clients can use the API on the same origin or through their own backend. Cross-origin browser access
-is not enabled by default.
+layer. Browser clients can use the API on the same origin or through their own backend. Cross-origin browser access is
+enabled for `http://localhost` and `http://127.0.0.1` on any port, including the session cookie, so a separately
+served React build needs no reverse proxy. Any other origin receives `403` and must use a same-origin reverse proxy.
 
 ### History
 
@@ -221,22 +222,28 @@ response does not embed the image. Retrieve its bytes through `GET /v1/sessions/
 ### Session configuration
 
 `GET /v1/sessions/{sessionId}/config` returns `200` with `sessionId`, `systemPrompt`, `fixedProtagonists`, `rules`,
-`temperature`, and `effectiveTemperature`. Prompt fields contain their stored text; `fixedProtagonists` contains YAML.
-`temperature` is the nullable session override; `effectiveTemperature` resolves a null override to the configured
-`chat.temperature`.
+`temperature`, `effectiveTemperature`, `streamingEnabled`, `validationEnabled`, `graphEnabled`,
+`effectiveStreamingEnabled`, `effectiveValidationEnabled`, `effectiveGraphEnabled`, `maxTokens`, and
+`effectiveMaxTokens`. Prompt fields contain their stored text; `fixedProtagonists` contains YAML. A null override
+follows the application default, which the matching effective field reports: `chat.temperature` for temperature and
+`chat.maxTokens` for the maximum tokens a single response may use.
 
 `PATCH /v1/sessions/{sessionId}/config` accepts a JSON object containing any subset of `systemPrompt`,
-`fixedProtagonists`, `rules`, and `temperature`, for example:
+`fixedProtagonists`, `rules`, `temperature`, `streamingEnabled`, `validationEnabled`, `graphEnabled`, and `maxTokens`,
+for example:
 
 ```json
-{"temperature": 0.8, "rules": "Keep the story consistent."}
+{"temperature": 0.8, "maxTokens": 512, "rules": "Keep the story consistent."}
 ```
 
 Omitted fields retain their stored values. An empty object is a no-op. Prompt fields must be nonblank strings and use
 the same normalization and YAML validation as the settings page. Explicit null is rejected for prompt fields.
 Temperature must be a JSON number between `0` and `2`, inclusive, or null. Setting `temperature` to null restores the
 application default. Database storage rounds temperature to three decimal places; the response contains the stored
-value. Unknown fields and malformed JSON are rejected with `400` and the existing `invalid_request` error shape.
+value. `maxTokens` must be a whole JSON number or null: above `0` it limits a response, `0` removes any limit for that
+session even when the application configures one, and null restores the `chat.maxTokens` default; below `0` or above
+`1000000` it is rejected. Unknown fields and malformed JSON are rejected with `400` and the existing `invalid_request`
+error shape.
 
 All supplied fields are validated before persistence and updated in one repository transaction. The patch does not
 rewrite omitted prompts, the knowledge graph, or memory. It returns `200` with the same shape as `GET /config`.

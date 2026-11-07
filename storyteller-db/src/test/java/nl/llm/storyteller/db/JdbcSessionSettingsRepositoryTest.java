@@ -130,4 +130,49 @@ class JdbcSessionSettingsRepositoryTest {
     assertEquals(Boolean.FALSE, reloaded.load("off").graphEnabled());
     org.junit.jupiter.api.Assertions.assertNull(reloaded.load("inherit").graphEnabled(), "An untouched session still inherits");
   }
+
+  @Test
+  @DisplayName("""
+    Given sessions whose response limit is patched or saved,
+    When another repository opens the same database,
+    Then the cap, the explicit limit-free choice and the inherited choice persist
+    """)
+  void shouldPersistMaxTokensAcrossRepositoryReload() {
+    String url = "jdbc:h2:file:" + temporaryDirectory.resolve("max-tokens");
+    Database database = new Database(url, "sa", "");
+    new SchemaInitializer(database).initialize();
+    Instant now = Instant.now();
+    var sessions = new JdbcSessionRepository(database);
+    for (String id : java.util.List.of("capped", "unlimited", "inherit")) {
+      sessions.create(new SessionRecord(id, "Story", now, now, now, now.plusSeconds(3600), false),
+        new SessionPrompts("System", "Fixed", "Rules"));
+    }
+    var repository = new JdbcSessionSettingsRepository(database);
+    org.junit.jupiter.api.Assertions.assertNull(repository.load("capped").maxTokens(),
+      "A fresh session inherits the server default");
+    repository.patchConfiguration("capped", java.util.Map.of(), false, null, false, null, null, false, null,
+      true, 512);
+    repository.patchConfiguration("unlimited", java.util.Map.of(), false, null, false, null, null, false, null,
+      true, 0);
+
+    var reloaded = new JdbcSessionSettingsRepository(new Database(url, "sa", ""));
+    reloaded.patchConfiguration("capped", java.util.Map.of(), true, 0.5);
+
+    assertEquals(Integer.valueOf(512), reloaded.load("capped").maxTokens(),
+      "An unrelated temperature patch keeps the stored cap");
+    assertEquals(Integer.valueOf(0), reloaded.load("unlimited").maxTokens(),
+      "Zero persists as an explicit limit-free choice instead of becoming null");
+    org.junit.jupiter.api.Assertions.assertNull(reloaded.load("inherit").maxTokens(),
+      "An untouched session still inherits");
+
+    reloaded.save("capped", new SessionSettings(reloaded.load("capped").prompts(),
+      KnowledgeGraphDocument.empty(), null, null, null, null, 4096));
+    assertEquals(Integer.valueOf(4096), reloaded.load("capped").maxTokens(),
+      "A full save writes the response limit");
+
+    reloaded.patchConfiguration("capped", java.util.Map.of(), false, null, false, null, null, false, null,
+      true, null);
+    org.junit.jupiter.api.Assertions.assertNull(reloaded.load("capped").maxTokens(),
+      "An explicit null returns the session to the inherited default");
+  }
 }

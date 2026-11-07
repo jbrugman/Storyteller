@@ -53,10 +53,27 @@
         <textarea id="rules" name="rules" rows="12" maxlength="1000000"
                   required></textarea>
 
+        <fieldset>
+          <legend>Knowledge graph</legend>
+          <label><input type="checkbox" id="graphEnabled" name="graphEnabled" checked> Use the knowledge graph</label>
+          <p class="setting-hint">When on, facts from the graph below ground story generation and validation, and each turn
+            updates the graph automatically. Manual graph tools below always stay available. When off, the story ignores the
+            graph and stops updating it; stored facts are kept. Defaults to the server's graph.enabled setting and is saved
+            per session in the database.</p>
+        </fieldset>
+
         <label for="knowledgeGraph">Knowledge graph (JSON)</label>
         <textarea id="knowledgeGraph" name="knowledgeGraph" rows="18" maxlength="1000000"
                   aria-invalid="false"
                   required></textarea>
+
+        <fieldset>
+          <legend>Response generation</legend>
+          <input type="hidden" name="generationSettings" value="true">
+          <label><input type="checkbox" id="streamingEnabled" name="streamingEnabled"> Streaming</label>
+          <label><input type="checkbox" id="validationEnabled" name="validationEnabled" checked> Validation</label>
+          <p class="setting-hint">Streaming shows text while it is generated and requires validation to be off. Enabling either option turns the other off. Both may be off. Saved per session in the database.</p>
+        </fieldset>
 
         <fieldset class="temperature-fieldset">
           <label for="temperature">Chat temperature</label>
@@ -70,6 +87,16 @@
               0.60
             </output>
           </div>
+        </fieldset>
+
+        <fieldset class="max-tokens-fieldset">
+          <label for="maxTokens">Maximum response tokens</label>
+          <p class="setting-hint">
+            Limits how many tokens one response may use. Leave the field empty to follow the server default shown as
+            placeholder, or enter 0 for no limit. Only a limit can stop a response mid-sentence, so lower it
+            deliberately on a smaller model. Range: 0 to 1000000. Saved per session in the database.
+          </p>
+          <input type="number" id="maxTokens" name="maxTokens" min="0" max="1000000" step="1" placeholder="0">
         </fieldset>
 
         <div class="graph-tools" aria-label="Knowledge graph actions">

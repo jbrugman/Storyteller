@@ -96,6 +96,38 @@ class SchemaInitializerTest {
     assertEquals(Boolean.FALSE, loaded.validationEnabled());
   }
 
+  @Test
+  @DisplayName("""
+    Given an existing database without a response limit,
+    When schema initialization runs twice,
+    Then the additive max_tokens column is added and stored choices are preserved
+    """)
+  void shouldMigrateMaxTokensSetting() throws Exception {
+    Database database = database();
+    var initializer = new SchemaInitializer(database);
+    initializer.initialize();
+    var now = java.time.Instant.now();
+    new JdbcSessionRepository(database).create(
+      new SessionRecord("session", "Story", now, now, now, now.plusSeconds(3600), false),
+      new SessionPrompts("System", "Fixed", "Rules"));
+    var repository = new JdbcSessionSettingsRepository(database);
+    repository.setTemperature("session", 0.75);
+    repository.patchConfiguration("session", java.util.Map.of(), false, null, false, null, false, false, null,
+      true, 512);
+    try (var connection = database.openConnection(); var statement = connection.createStatement()) {
+      statement.execute("ALTER TABLE session_configuration DROP COLUMN max_tokens");
+    }
+
+    initializer.initialize();
+    initializer.initialize();
+
+    assertTrue(hasColumn(database, "SESSION_CONFIGURATION", "MAX_TOKENS"));
+    var loaded = new JdbcSessionSettingsRepository(database).load("session");
+    org.junit.jupiter.api.Assertions.assertNull(loaded.maxTokens(),
+      "Existing sessions inherit the server default after the upgrade");
+    assertEquals(Double.valueOf(0.75), loaded.temperature(), "The stored temperature survives the upgrade");
+  }
+
   private Database database() {
     return new Database("jdbc:h2:file:" + temporaryDirectory.resolve("schema"), "sa", "");
   }
