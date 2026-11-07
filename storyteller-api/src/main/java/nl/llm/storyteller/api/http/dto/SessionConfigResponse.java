@@ -12,5 +12,7 @@ public record SessionConfigResponse(
   Boolean graphEnabled,
   boolean effectiveStreamingEnabled,
   boolean effectiveValidationEnabled,
-  boolean effectiveGraphEnabled
+  boolean effectiveGraphEnabled,
+  Integer maxTokens,
+  Integer effectiveMaxTokens
 ) { }

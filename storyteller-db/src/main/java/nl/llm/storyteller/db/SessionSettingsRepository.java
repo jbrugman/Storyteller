@@ -18,8 +18,15 @@ public interface SessionSettingsRepository {
   default void patchConfiguration(String sessionId, Map<String, String> prompts, boolean updateTemperature,
     Double temperature, boolean updateGeneration, Boolean streamingEnabled, Boolean validationEnabled,
     boolean updateGraph, Boolean graphEnabled) {
-    if (updateGeneration || updateGraph) {
-      throw new UnsupportedOperationException("Generation and knowledge graph settings need dedicated"
+    patchConfiguration(sessionId, prompts, updateTemperature, temperature, updateGeneration, streamingEnabled,
+      validationEnabled, updateGraph, graphEnabled, false, null);
+  }
+
+  default void patchConfiguration(String sessionId, Map<String, String> prompts, boolean updateTemperature,
+    Double temperature, boolean updateGeneration, Boolean streamingEnabled, Boolean validationEnabled,
+    boolean updateGraph, Boolean graphEnabled, boolean updateMaxTokens, Integer maxTokens) {
+    if (updateGeneration || updateGraph || updateMaxTokens) {
+      throw new UnsupportedOperationException("Generation, knowledge graph and max token settings need dedicated"
         + " repository support.");
     }
     patchConfiguration(sessionId, prompts, updateTemperature, temperature);

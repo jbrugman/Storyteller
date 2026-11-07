@@ -29,6 +29,7 @@ import java.util.Optional;
 
 public final class WebController {
   private static final int STORY_PAGE_MESSAGES = 10;
+  private static final int MAX_TOKENS_LIMIT = 1_000_000;
   private final SessionService sessionService;
   private final SessionCookieService cookieService;
   private final StoryService storyService;
@@ -39,6 +40,7 @@ public final class WebController {
   private final SessionAtlasService atlasService;
   private final SessionKnowledgeGraphService knowledgeGraphService;
   private final double defaultTemperature;
+  private final int defaultMaxTokens;
 
   public WebController(
     SessionService sessionService,
@@ -50,7 +52,8 @@ public final class WebController {
     SessionMemoryService memoryService,
     SessionKnowledgeGraphService knowledgeGraphService,
     SessionAtlasService atlasService,
-    double defaultTemperature
+    double defaultTemperature,
+    int defaultMaxTokens
   ) {
     this.sessionService = sessionService;
     this.cookieService = cookieService;
@@ -62,6 +65,7 @@ public final class WebController {
     this.atlasService = atlasService;
     this.knowledgeGraphService = knowledgeGraphService;
     this.defaultTemperature = defaultTemperature;
+    this.defaultMaxTokens = defaultMaxTokens;
   }
 
   public void register(JavalinConfig config) {
@@ -212,7 +216,9 @@ public final class WebController {
       ),
       "streamingEnabled", settingsService.streamingEnabled(settings),
       "validationEnabled", settingsService.validationEnabled(settings),
-      "graphEnabled", settingsService.graphEnabled(settings)
+      "graphEnabled", settingsService.graphEnabled(settings),
+      "maxTokens", settings.maxTokens() == null ? "" : String.valueOf(settings.maxTokens()),
+      "defaultMaxTokens", defaultMaxTokens
     ));
   }
 
@@ -430,7 +436,8 @@ public final class WebController {
       temperature,
       submittedStreaming(context, session.get().sessionId()),
       submittedValidation(context, session.get().sessionId()),
-      submittedGraph(context, session.get().sessionId())
+      submittedGraph(context, session.get().sessionId()),
+      parseMaxTokens(context.formParam("maxTokens"))
     );
     cookieService.write(context, session.get().sessionId(), session.get().infinite());
     context.redirect("/story", HttpStatus.SEE_OTHER);
@@ -470,6 +477,21 @@ public final class WebController {
     return temperature != null ? temperature : defaultTemperature;
   }
 
+  private Integer parseMaxTokens(String value) {
+    if (value == null || value.isBlank()) {
+      return null;
+    }
+    try {
+      int tokens = Integer.parseInt(value.trim());
+      if (tokens < 0 || tokens > MAX_TOKENS_LIMIT) {
+        return null;
+      }
+      return tokens;
+    } catch (NumberFormatException _) {
+      return null;
+    }
+  }
+
   private boolean submittedSettingsCouldNotBeSaved(Context context, SessionRecord session) {
     String systemPrompt = context.formParam("systemPrompt");
     String fixedProtagonists = context.formParam("fixedProtagonists");
@@ -477,13 +499,14 @@ public final class WebController {
     String knowledgeGraph = context.formParam("knowledgeGraph");
     String temperatureParam = context.formParam("temperature");
     Double temperature = parseTemperature(temperatureParam);
+    Integer maxTokens = parseMaxTokens(context.formParam("maxTokens"));
     SessionPrompts submittedPrompts = new SessionPrompts(
       valueOrEmpty(systemPrompt), valueOrEmpty(fixedProtagonists), valueOrEmpty(rules)
     );
     try {
       settingsService.save(session.sessionId(), systemPrompt, fixedProtagonists, rules, knowledgeGraph, temperature,
         submittedStreaming(context, session.sessionId()), submittedValidation(context, session.sessionId()),
-        submittedGraph(context, session.sessionId()));
+        submittedGraph(context, session.sessionId()), maxTokens);
     } catch (InvalidFixedProtagonistsException ex) {
       context.render("settings.jte", Map.of("page", StorySettingsPage.invalidYaml(
         submittedPrompts,
@@ -492,7 +515,9 @@ public final class WebController {
         ex
       ), "streamingEnabled", Boolean.TRUE.equals(submittedStreaming(context, session.sessionId())),
         "validationEnabled", Boolean.TRUE.equals(submittedValidation(context, session.sessionId())),
-        "graphEnabled", Boolean.TRUE.equals(submittedGraph(context, session.sessionId()))));
+        "graphEnabled", Boolean.TRUE.equals(submittedGraph(context, session.sessionId())),
+        "maxTokens", maxTokens == null ? "" : String.valueOf(maxTokens),
+        "defaultMaxTokens", defaultMaxTokens));
       return true;
     } catch (InvalidKnowledgeGraphException ex) {
       context.render("settings.jte", Map.of("page", StorySettingsPage.invalidKnowledgeGraph(
@@ -502,7 +527,9 @@ public final class WebController {
         ex
       ), "streamingEnabled", Boolean.TRUE.equals(submittedStreaming(context, session.sessionId())),
         "validationEnabled", Boolean.TRUE.equals(submittedValidation(context, session.sessionId())),
-        "graphEnabled", Boolean.TRUE.equals(submittedGraph(context, session.sessionId()))));
+        "graphEnabled", Boolean.TRUE.equals(submittedGraph(context, session.sessionId())),
+        "maxTokens", maxTokens == null ? "" : String.valueOf(maxTokens),
+        "defaultMaxTokens", defaultMaxTokens));
       return true;
     }
     return false;

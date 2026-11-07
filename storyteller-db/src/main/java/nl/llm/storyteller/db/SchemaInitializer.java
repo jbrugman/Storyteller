@@ -42,6 +42,7 @@ public final class SchemaInitializer {
         addInfiniteSessionColumnIfMissing(connection);
         addColumnIfMissing(connection, "SESSION_CONFIGURATION", "STREAMING_ENABLED", "streaming_enabled BOOLEAN");
         addColumnIfMissing(connection, "SESSION_CONFIGURATION", "GRAPH_ENABLED", "graph_enabled BOOLEAN");
+        addColumnIfMissing(connection, "SESSION_CONFIGURATION", "MAX_TOKENS", "max_tokens INTEGER");
         addStoryImageColumnsIfMissing(connection);
         DatabaseEncryptionMigration.initialize(database, connection, existingTables);
         return;

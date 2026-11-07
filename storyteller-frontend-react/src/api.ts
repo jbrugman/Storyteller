@@ -43,6 +43,8 @@ export interface SessionConfig {
   effectiveStreamingEnabled: boolean;
   effectiveValidationEnabled: boolean;
   effectiveGraphEnabled: boolean;
+  maxTokens: number | null;
+  effectiveMaxTokens: number | null;
 }
 
 export class ApiError extends Error {
@@ -173,7 +175,7 @@ export const api = {
   createSession: (title: string) => request<Session>('/sessions', 'POST', { title }),
   history: (id: string, page?: HistoryPage) => request<SessionHistory>(`${sessionPath(id)}/history${historyQuery(page)}`),
   config: (id: string) => request<SessionConfig>(`${sessionPath(id)}/config`),
-  saveConfig: (id: string, settings: Pick<SessionConfig, 'systemPrompt' | 'fixedProtagonists' | 'rules' | 'temperature' | 'streamingEnabled' | 'validationEnabled' | 'graphEnabled'>) =>
+  saveConfig: (id: string, settings: Pick<SessionConfig, 'systemPrompt' | 'fixedProtagonists' | 'rules' | 'temperature' | 'streamingEnabled' | 'validationEnabled' | 'graphEnabled' | 'maxTokens'>) =>
     request<SessionConfig>(`${sessionPath(id)}/config`, 'PATCH', settings),
   resumeSession: (id: string) => request<Session>(`${sessionPath(id)}/resume`, 'POST'),
   importSession: (bundle: File) => {

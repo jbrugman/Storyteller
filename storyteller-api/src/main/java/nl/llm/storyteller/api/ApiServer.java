@@ -112,6 +112,8 @@ public final class ApiServer implements AutoCloseable {
     promptRepository.initializeMissing(defaultPrompts);
     JdbcSessionSettingsRepository settingsRepository = new JdbcSessionSettingsRepository(database);
     Double defaultTemperature = (Double) coreConfig.chatOptions().get("temperature");
+    Integer configuredMaxTokens = (Integer) coreConfig.chatOptions().get("max_tokens");
+    int defaultMaxTokens = configuredMaxTokens != null ? configuredMaxTokens : 0;
     SessionService sessionService = new SessionService(
       new JdbcSessionRepository(database),
       settingsRepository,
@@ -158,7 +160,8 @@ public final class ApiServer implements AutoCloseable {
       settingsService, PredicateCatalog.load(coreConfig.baseDir())
     );
     SessionDataController sessionDataController = new SessionDataController(
-      sessionService, storyService, storyTurnService, settingsService, memoryService, knowledgeGraphService, atlasService, defaultTemperature
+      sessionService, storyService, storyTurnService, settingsService, memoryService, knowledgeGraphService, atlasService, defaultTemperature,
+      defaultMaxTokens
     );
     WebController webController = new WebController(
       sessionService,
@@ -170,7 +173,8 @@ public final class ApiServer implements AutoCloseable {
       memoryService,
       knowledgeGraphService,
       atlasService,
-      defaultTemperature
+      defaultTemperature,
+      defaultMaxTokens
     );
     ApiTlsMaterial tlsMaterial = config.tls().enabled() ? ApiTlsMaterial.prepare(config.tls()) : null;
     Javalin server = Javalin.create(javalinConfig -> {

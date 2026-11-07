@@ -8,16 +8,17 @@ python3 -m http.server 8000 --directory wireframe
 ```
 
 Visit http://localhost:8000. No Java, database, API, or model is required.
-Every submitted prompt receives the same example scene about Valerie Thorne,
-Merel, and Roos at the beach house on the L’Horizon estate. The scene follows
+Every submitted prompt receives the next scene of a ten-part story about Valerie
+Thorne, Merel, and Roos at the beach house on the L’Horizon estate, wrapping from
+the last scene back to the first so the demo can run indefinitely. The story follows
 the characters in the bundled default `fixed_protagonists.yml`.
 Story input, image previews, undo, response layout controls, Atlas navigation
 and filtering, and all seven themes work locally. Settings and History action
 buttons, session resume/import, Infinite, and Export are disabled.
 Example settings can be edited for preview but are not saved.
-Settings and Atlas read `demo-data.js`: the bundled standard prompts,
-protagonist YAML and its parsed profile data, default chat temperature, predicate
-catalog, and a single example knowledge graph. Atlas derives its entities and
+Settings, Atlas and Story read `demo-data.js`: the bundled standard prompts,
+protagonist YAML and its parsed profile data, default chat temperature, the rotating
+demo story scenes, the predicate catalog, and a single example knowledge graph. Atlas derives its entities and
 relations from the same graph shown as JSON in Settings. The sample graph is
 demo data, not output from an AI model. Mike and Chris appear as profiles without
 graph facts, matching the production behavior for profiles absent from the graph.
