@@ -2,7 +2,7 @@
 @import nl.llm.storyteller.api.web.StoryPage
 
 @param StoryPage page
-@param boolean streamingEnabled = false
+@param String contextWarning = ""
 
 <!doctype html>
 <html lang="en">
@@ -46,6 +46,13 @@
           @endif
         </div>
       </header>
+
+      @if(!contextWarning.isBlank())
+        <p id="context-warning" class="settings-error context-warning" role="status">
+          ${contextWarning}
+          <a href="/story/memory">Open history</a>
+        </p>
+      @endif
 
       <section id="conversation" class="conversation"
                data-has-older="${page.hasOlder()}">
@@ -103,7 +110,9 @@
         @endfor
       </section>
 
-      <form id="composer" data-stream-url="${streamingEnabled ? "/v1/sessions/" + page.session().sessionId() + "/turns/stream" : null}" method="post" action="/story/turns" enctype="multipart/form-data" class="composer">
+      <form id="composer" data-stream-url="/v1/sessions/${page.session().sessionId()}/turns/stream"
+           data-config-url="/v1/sessions/${page.session().sessionId()}/config"
+           method="post" action="/story/turns" enctype="multipart/form-data" class="composer">
         <label for="prompt">What happens next?</label>
         <textarea id="prompt" name="prompt" rows="3" maxlength="100000" required autofocus>${page.submittedPrompt()}</textarea>
         <p id="image-error" role="alert" hidden></p>
@@ -357,6 +366,33 @@
       });
 
       let imageReadyToSubmit = false;
+      // Streaming is a session setting that the settings page can change without this page reloading, so the
+      // composer asks the server at submit time instead of trusting how the page was rendered. A submission
+      // already decided to post its plain form must not be delayed by that question again, and while the
+      // answer is pending no second submission may start.
+      let decidingStream = false;
+      let plainSubmission = false;
+      // Dispatch the composer once more, leaving the browser free to perform its own submission: native
+      // validation, the multipart body and the server's own error page all stay in charge.
+      const redispatch = () => {
+        imageReadyToSubmit = true;
+        composer.requestSubmit(continueButton);
+        imageReadyToSubmit = false;
+      };
+      const lockComposer = submitter => {
+        submitting = true;
+        composer.setAttribute("aria-busy", "true");
+        prompt.readOnly = true;
+        imagePicker.setAttribute("aria-disabled", "true");
+        removeImage.disabled = true;
+        actionButtons.forEach(button => button.disabled = true);
+        actionLinks.forEach(link => link.setAttribute("aria-disabled", "true"));
+        if (submitter === continueButton) {
+          continueButton.textContent = "Writing…";
+        } else {
+          undoButton.textContent = "Undoing…";
+        }
+      };
       composer.addEventListener("submit", event => {
         if (event.submitter === continueButton && !imageError.hidden) {
           event.preventDefault();
@@ -367,52 +403,56 @@
           const selection = imageSelection;
           imagePreparation.then(() => window.setTimeout(() => {
             if (selection !== imageSelection || !imageError.hidden || submitting) return;
-            imageReadyToSubmit = true;
-            composer.requestSubmit(continueButton);
-            imageReadyToSubmit = false;
+            redispatch();
           }, 0));
           return;
         }
-        if (submitting) {
+        if (submitting || decidingStream) {
           event.preventDefault();
           return;
         }
-        if (event.submitter === continueButton && composer.dataset.streamUrl) {
+        if (event.submitter === continueButton && composer.dataset.streamUrl && !plainSubmission) {
+          // preventDefault has to happen here: once the answer arrives the event is no longer cancelable.
           event.preventDefault();
-          generationError.hidden = true;
-          generationError.textContent = "";
-          const body = new FormData(composer);
-          StoryStreaming.generate(composer.dataset.streamUrl, body, document.querySelector(".conversation"))
-            .then(() => {
-              prompt.value = "";
-              window.location.reload();
-            })
-            .catch(error => {
-              generationError.textContent = error.message;
-              generationError.hidden = false;
-              submitting = false;
-              composer.setAttribute("aria-busy", "false");
-              prompt.readOnly = false;
-              imagePicker.removeAttribute("aria-disabled");
-              removeImage.disabled = false;
-              actionButtons.forEach(button => button.disabled = false);
-              undoButton.disabled = undoButton.dataset.undoAvailable !== "true";
-              actionLinks.forEach(link => link.removeAttribute("aria-disabled"));
-              continueButton.textContent = "Continue story";
-            });
+          decidingStream = true;
+          StoryStreaming.streamEnabled(composer).then(streaming => {
+            decidingStream = false;
+            if (!streaming) {
+              plainSubmission = true;
+              return redispatch();
+            }
+            generationError.hidden = true;
+            generationError.textContent = "";
+            const body = new FormData(composer);
+            StoryStreaming.generate(composer.dataset.streamUrl, body, document.querySelector(".conversation"))
+              .then(() => {
+                prompt.value = "";
+                window.location.reload();
+              })
+              .catch(error => {
+                generationError.textContent = error.message;
+                generationError.hidden = false;
+                submitting = false;
+                composer.setAttribute("aria-busy", "false");
+                prompt.readOnly = false;
+                imagePicker.removeAttribute("aria-disabled");
+                removeImage.disabled = false;
+                actionButtons.forEach(button => button.disabled = false);
+                undoButton.disabled = undoButton.dataset.undoAvailable !== "true";
+                actionLinks.forEach(link => link.removeAttribute("aria-disabled"));
+                continueButton.textContent = "Continue story";
+              });
+            lockComposer(continueButton);
+          }).catch(() => {
+            // A decision that cannot be made costs streaming and never a story turn.
+            decidingStream = false;
+            plainSubmission = true;
+            redispatch();
+          });
+          return;
         }
-        submitting = true;
-        composer.setAttribute("aria-busy", "true");
-        prompt.readOnly = true;
-        imagePicker.setAttribute("aria-disabled", "true");
-        removeImage.disabled = true;
-        actionButtons.forEach(button => button.disabled = true);
-        actionLinks.forEach(link => link.setAttribute("aria-disabled", "true"));
-        if (event.submitter === continueButton) {
-          continueButton.textContent = "Writing…";
-        } else {
-          undoButton.textContent = "Undoing…";
-        }
+        plainSubmission = false;
+        lockComposer(event.submitter);
       });
 
       prompt.addEventListener("keydown", event => {

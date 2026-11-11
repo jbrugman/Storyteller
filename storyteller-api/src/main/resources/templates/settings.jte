@@ -1,6 +1,8 @@
+@import nl.llm.storyteller.api.web.StoryContextPage
 @import nl.llm.storyteller.api.web.StorySettingsPage
 
 @param StorySettingsPage page
+@param StoryContextPage context
 @param boolean streamingEnabled = false
 @param boolean validationEnabled = true
 @param boolean graphEnabled = true
@@ -125,6 +127,32 @@
           </p>
           <input type="number" id="maxTokens" name="maxTokens" min="0" max="1000000" step="1"
                  value="${maxTokens}" placeholder="${defaultMaxTokens}" />
+        </fieldset>
+
+        <fieldset class="context-fieldset">
+          <legend>Context window</legend>
+          <input type="hidden" name="contextSettings" value="true">
+          <label for="contextMode">Recent story sent verbatim</label>
+          <select id="contextMode" name="contextMode">
+            <option value="" selected="${context.mode().isEmpty()}">Server default</option>
+            <option value="turns" selected="${context.isMode("turns")}">Turns</option>
+            <option value="rolling" selected="${context.isMode("rolling")}">Rolling window</option>
+          </select>
+          <p class="setting-hint">
+            Turns sends the configured number of recent turns. Rolling fills the model's context window with as many
+            recent turns as still fit: the prompts, canonical state, summaries and this turn always go out, and the
+            older story reaches the model through its summaries. Leaving it on Server default follows the server's
+            chat.contextMode, currently ${context.serverMode()}. Saved per session in the database.
+          </p>
+          <label for="contextWindow">Model context window (tokens)</label>
+          <input type="number" id="contextWindow" name="contextWindow" min="0" max="100000000" step="1"
+                 value="${context.window()}" placeholder="${context.serverWindow()}" />
+          <p class="setting-hint">
+            Rolling mode needs to know how large the model's window is. Leave the field empty to follow the server
+            default shown as placeholder, or enter 0 when the size is unknown; rolling then sends the recent turns of
+            turns mode and the history page says so. A model that needs room for its reasoning also needs it counted
+            here. Range: 0 to 100000000. Saved per session in the database.
+          </p>
         </fieldset>
 
         <div class="graph-tools" aria-label="Knowledge graph actions">

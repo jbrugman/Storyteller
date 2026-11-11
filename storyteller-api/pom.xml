@@ -136,6 +136,45 @@
   </build>
 
   <profiles>
+    <!-- Bundles the built React SPA onto the api classpath under /app so the same-origin UI
+         ships inside the packaged jar. Gated to CI (the only place dist is built); local and
+         offline builds stay unchanged and serve the JTE interface. dist is produced by the
+         storyteller-frontend-react module, which the reactor builds before this module. -->
+    <profile>
+      <id>bundle-react-app</id>
+      <activation>
+        <property>
+          <name>env.CI</name>
+        </property>
+      </activation>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-resources-plugin</artifactId>
+            <version>3.3.1</version>
+            <executions>
+              <execution>
+                <id>bundle-react-spa</id>
+                <phase>prepare-package</phase>
+                <goals>
+                  <goal>copy-resources</goal>
+                </goals>
+                <configuration>
+                  <outputDirectory>${project.build.outputDirectory}/app</outputDirectory>
+                  <resources>
+                    <resource>
+                      <directory>${project.basedir}/../storyteller-frontend-react/dist</directory>
+                      <filtering>false</filtering>
+                    </resource>
+                  </resources>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
     <profile>
       <id>native-api</id>
       <activation>
@@ -157,6 +196,7 @@
                 <buildArg>-H:IncludeResources=systemprompts/.*</buildArg>
                 <buildArg>-H:IncludeResources=db/.*</buildArg>
                 <buildArg>-H:IncludeResources=public/.*</buildArg>
+                <buildArg>-H:IncludeResources=app/.*</buildArg>
                 <buildArg>-H:IncludeResources=application.config</buildArg>
                 <buildArg>--enable-native-access=ALL-UNNAMED</buildArg>
                 <buildArg>-H:+SharedArenaSupport</buildArg>

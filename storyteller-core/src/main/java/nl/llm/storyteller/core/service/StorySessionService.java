@@ -4,7 +4,6 @@ import nl.llm.storyteller.core.graph.turnbasedservice.TurnBasedKnowledgeGraphSer
 import nl.llm.storyteller.core.model.Message;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.List;
 
 public final class StorySessionService {
@@ -82,17 +81,19 @@ public final class StorySessionService {
       return handleControlTurn(userInput);
     }
 
-    return handleStoryTurn(userInput, promptAssemblyService.buildChatMessages(userInput));
+    PromptAssemblyService.AssembledRequest request = promptAssemblyService.buildChatRequest(userInput);
+    return handleStoryTurn(userInput, request.messages(), request.contextTarget());
   }
 
   public String handleImageTurn(String userInput, String imageDataUrl) throws IOException, InterruptedException {
-    List<Message> messages = new ArrayList<>(promptAssemblyService.buildChatMessages(userInput));
-    Message userMessage = messages.getLast();
-    messages.set(messages.size() - 1, Message.withImage(userMessage.role(), userMessage.content(), imageDataUrl));
-    return handleStoryTurn(userInput, messages);
+    // The assembler attaches the picture and measures it against the budget before history is trimmed,
+    // so a turn carrying a picture plans the context the model will actually receive.
+    PromptAssemblyService.AssembledRequest request = promptAssemblyService.buildChatRequest(userInput, imageDataUrl);
+    return handleStoryTurn(userInput, request.messages(), request.contextTarget());
   }
 
-  private String handleStoryTurn(String userInput, List<Message> messages) throws IOException, InterruptedException {
+  private String handleStoryTurn(String userInput, List<Message> messages, int contextTarget)
+    throws IOException, InterruptedException {
     String draftResponse = chatClient.chat(
       messages,
       config.chatOptions(),
@@ -101,7 +102,8 @@ public final class StorySessionService {
     String response = validateResponse(userInput, draftResponse);
     turnObserver.completed(userInput, draftResponse, response);
 
-    historyStore.appendTurn(userInput, response);
+    // Recorded only after a successful generation; a throw above leaves the request frontier untouched.
+    historyStore.appendTurn(userInput, response, contextTarget);
     if (turnBasedKnowledgeGraphService != null) {
       turnBasedKnowledgeGraphService.startUpdateIfNeeded();
     }

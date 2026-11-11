@@ -9,6 +9,7 @@ import io.javalin.http.HttpStatus;
 import nl.llm.storyteller.api.http.dto.ErrorResponse;
 import nl.llm.storyteller.api.http.dto.SessionConfigPatchRequest;
 import nl.llm.storyteller.api.http.dto.SessionConfigResponse;
+import nl.llm.storyteller.api.http.dto.SessionContextResponse;
 import nl.llm.storyteller.api.http.dto.SessionHistoryResponse;
 import nl.llm.storyteller.api.http.dto.SessionStateResponse;
 import nl.llm.storyteller.api.http.dto.SessionGraphResponse;
@@ -136,7 +137,9 @@ public final class SessionDataController {
       patch.streamingEnabled() != null, patchedBoolean(patch.streamingEnabled(), "streamingEnabled"),
       patch.validationEnabled() != null, patchedBoolean(patch.validationEnabled(), "validationEnabled"),
       patch.graphEnabled() != null, patchedBoolean(patch.graphEnabled(), "graphEnabled"),
-      patch.maxTokens() != null, patchedMaxTokens(patch.maxTokens())
+      patch.maxTokens() != null, patchedMaxTokens(patch.maxTokens()),
+      patch.contextMode() != null, patchedContextMode(patch.contextMode()),
+      patch.contextWindow() != null, patchedContextWindow(patch.contextWindow())
     );
     context.json(configurationResponse(sessionId, settingsService.load(sessionId)));
   }
@@ -162,10 +165,12 @@ public final class SessionDataController {
       return;
     }
     var memory = memoryService.load(sessionId);
+    var report = storyTurnService.contextReport(sessionId);
     context.json(new SessionStateResponse(
       sessionId, memory.summary(), memory.recentSummary(), memory.canonicalState(),
       memory.summaryCursor(), memory.recentSummaryCursor(), memory.canonicalStateCursor(),
-      graphCodec.toJson(settingsService.load(sessionId).knowledgeGraph())
+      graphCodec.toJson(settingsService.load(sessionId).knowledgeGraph()),
+      SessionContextResponse.from(report)
     ));
   }
 
@@ -254,7 +259,11 @@ public final class SessionDataController {
       settingsService.streamingEnabled(settings), settingsService.validationEnabled(settings),
       settingsService.graphEnabled(settings),
       settings.maxTokens(),
-      settings.maxTokens() != null ? settings.maxTokens() : defaultMaxTokens
+      settings.maxTokens() != null ? settings.maxTokens() : defaultMaxTokens,
+      settings.contextMode(),
+      settingsService.contextMode(settings),
+      settings.contextWindow(),
+      settingsService.contextWindow(settings)
     );
   }
 
@@ -307,6 +316,28 @@ public final class SessionDataController {
     if (!value.isNumber() || !Double.isFinite(value.doubleValue())
       || value.doubleValue() != Math.rint(value.doubleValue())) {
       throw new IllegalArgumentException("maxTokens must be a whole number, 0 for no limit, or null.");
+    }
+    return value.intValue();
+  }
+
+  private String patchedContextMode(JsonNode value) {
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isTextual()) {
+      throw new IllegalArgumentException("contextMode must be \"turns\", \"rolling\", or null.");
+    }
+    return value.textValue();
+  }
+
+  private Integer patchedContextWindow(JsonNode value) {
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isNumber() || !Double.isFinite(value.doubleValue())
+      || value.doubleValue() != Math.rint(value.doubleValue())) {
+      throw new IllegalArgumentException("contextWindow must be a whole number of tokens, 0 for an unknown"
+        + " window, or null.");
     }
     return value.intValue();
   }

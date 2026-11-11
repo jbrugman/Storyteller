@@ -9,7 +9,8 @@ import java.util.Map;
 
 public final class JdbcSessionSettingsRepository implements SessionSettingsRepository {
   private static final String SELECT_SESSION_CONFIGURATION = """
-    SELECT temperature, streaming_enabled, validation_enabled, graph_enabled, max_tokens
+    SELECT temperature, streaming_enabled, validation_enabled, graph_enabled, max_tokens,
+      context_mode, context_window
       FROM session_configuration WHERE session_id = ?
     """;
   private static final String UPDATE_SESSION_CONFIGURATION_TEMPERATURE = """
@@ -17,6 +18,15 @@ public final class JdbcSessionSettingsRepository implements SessionSettingsRepos
     """;
   private static final String UPDATE_SESSION_CONFIGURATION_MAX_TOKENS = """
     UPDATE session_configuration SET max_tokens = ? WHERE session_id = ?
+    """;
+  private static final String UPDATE_SESSION_CONFIGURATION_CONTEXT = """
+    UPDATE session_configuration SET context_mode = ?, context_window = ? WHERE session_id = ?
+    """;
+  private static final String UPDATE_SESSION_CONFIGURATION_CONTEXT_MODE = """
+    UPDATE session_configuration SET context_mode = ? WHERE session_id = ?
+    """;
+  private static final String UPDATE_SESSION_CONFIGURATION_CONTEXT_WINDOW = """
+    UPDATE session_configuration SET context_window = ? WHERE session_id = ?
     """;
 
   private final Database database;
@@ -39,7 +49,8 @@ public final class JdbcSessionSettingsRepository implements SessionSettingsRepos
           BigDecimal temperature = rows.getBigDecimal("temperature");
           return new SessionSettings(prompts, graph, temperature == null ? null : temperature.doubleValue(),
             rows.getObject("streaming_enabled", Boolean.class), rows.getObject("validation_enabled", Boolean.class),
-            rows.getObject("graph_enabled", Boolean.class), rows.getObject("max_tokens", Integer.class));
+            rows.getObject("graph_enabled", Boolean.class), rows.getObject("max_tokens", Integer.class),
+            rows.getString("context_mode"), rows.getObject("context_window", Integer.class));
         }
       }
     } catch (SQLException ex) {
@@ -78,34 +89,31 @@ public final class JdbcSessionSettingsRepository implements SessionSettingsRepos
   }
 
   @Override
-  public void patchConfiguration(String sessionId, Map<String, String> prompts, boolean updateTemperature,
-    Double temperature, boolean updateGeneration, Boolean streamingEnabled, Boolean validationEnabled,
-    boolean updateGraph, Boolean graphEnabled) {
-    patchConfiguration(sessionId, prompts, updateTemperature, temperature, updateGeneration, streamingEnabled,
-      validationEnabled, updateGraph, graphEnabled, false, null);
-  }
-
-  @Override
-  public void patchConfiguration(String sessionId, Map<String, String> prompts, boolean updateTemperature,
-    Double temperature, boolean updateGeneration, Boolean streamingEnabled, Boolean validationEnabled,
-    boolean updateGraph, Boolean graphEnabled, boolean updateMaxTokens, Integer maxTokens) {
-    if (Boolean.TRUE.equals(streamingEnabled) && Boolean.TRUE.equals(validationEnabled)) {
+  public void patchConfiguration(String sessionId, ConfigurationPatch patch) {
+    if (Boolean.TRUE.equals(patch.streamingEnabled()) && Boolean.TRUE.equals(patch.validationEnabled())) {
       throw new IllegalArgumentException("Streaming and validation cannot both be enabled.");
     }
     try (Connection connection = database.openConnection()) {
       connection.setAutoCommit(false);
       try {
-        for (var prompt : prompts.entrySet()) {
+        for (var prompt : patch.prompts().entrySet()) {
           updatePrompt(connection, sessionId, prompt.getKey(), prompt.getValue());
         }
-        if (updateTemperature) {
-          updateTemperatureInTransaction(connection, sessionId, temperature);
+        if (patch.updateTemperature()) {
+          updateTemperatureInTransaction(connection, sessionId, patch.temperature());
         }
-        if (updateGeneration || updateGraph) {
-          updateGeneration(connection, sessionId, streamingEnabled, validationEnabled, graphEnabled);
+        if (patch.updateGeneration() || patch.updateGraph()) {
+          updateGeneration(connection, sessionId, patch.streamingEnabled(), patch.validationEnabled(),
+            patch.graphEnabled());
         }
-        if (updateMaxTokens) {
-          updateMaxTokensInTransaction(connection, sessionId, maxTokens);
+        if (patch.updateMaxTokens()) {
+          updateMaxTokensInTransaction(connection, sessionId, patch.maxTokens());
+        }
+        if (patch.updateContextMode()) {
+          updateContextModeInTransaction(connection, sessionId, patch.contextMode());
+        }
+        if (patch.updateContextWindow()) {
+          updateContextWindowInTransaction(connection, sessionId, patch.contextWindow());
         }
         connection.commit();
       } catch (SQLException ex) {
@@ -155,6 +163,7 @@ public final class JdbcSessionSettingsRepository implements SessionSettingsRepos
       updateGeneration(connection, sessionId, settings.streamingEnabled(), settings.validationEnabled(),
         settings.graphEnabled());
       updateMaxTokensInTransaction(connection, sessionId, settings.maxTokens());
+      updateContextInTransaction(connection, sessionId, settings.contextMode(), settings.contextWindow());
       connection.commit();
     } catch (SQLException ex) {
       rollback(connection, ex);
@@ -181,6 +190,52 @@ public final class JdbcSessionSettingsRepository implements SessionSettingsRepos
         statement.setInt(1, maxTokens);
       }
       statement.setString(2, sessionId);
+      requireUpdated(statement, "Session configuration does not exist: " + sessionId);
+    }
+  }
+
+  private void updateContextModeInTransaction(Connection connection, String sessionId, String contextMode)
+    throws SQLException {
+    try (PreparedStatement statement =
+      connection.prepareStatement(UPDATE_SESSION_CONFIGURATION_CONTEXT_MODE)) {
+      if (contextMode == null || contextMode.isBlank()) {
+        statement.setNull(1, java.sql.Types.VARCHAR);
+      } else {
+        statement.setString(1, contextMode);
+      }
+      statement.setString(2, sessionId);
+      requireUpdated(statement, "Session configuration does not exist: " + sessionId);
+    }
+  }
+
+  private void updateContextWindowInTransaction(Connection connection, String sessionId, Integer contextWindow)
+    throws SQLException {
+    try (PreparedStatement statement =
+      connection.prepareStatement(UPDATE_SESSION_CONFIGURATION_CONTEXT_WINDOW)) {
+      if (contextWindow == null) {
+        statement.setNull(1, java.sql.Types.INTEGER);
+      } else {
+        statement.setInt(1, contextWindow);
+      }
+      statement.setString(2, sessionId);
+      requireUpdated(statement, "Session configuration does not exist: " + sessionId);
+    }
+  }
+
+  private void updateContextInTransaction(Connection connection, String sessionId, String contextMode,
+    Integer contextWindow) throws SQLException {
+    try (PreparedStatement statement = connection.prepareStatement(UPDATE_SESSION_CONFIGURATION_CONTEXT)) {
+      if (contextMode == null || contextMode.isBlank()) {
+        statement.setNull(1, java.sql.Types.VARCHAR);
+      } else {
+        statement.setString(1, contextMode);
+      }
+      if (contextWindow == null) {
+        statement.setNull(2, java.sql.Types.INTEGER);
+      } else {
+        statement.setInt(2, contextWindow);
+      }
+      statement.setString(3, sessionId);
       requireUpdated(statement, "Session configuration does not exist: " + sessionId);
     }
   }

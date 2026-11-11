@@ -2,7 +2,7 @@ package nl.llm.storyteller.db;
 
 final class ApplicationStorageQueries {
   static final String SELECT_HISTORY = """
-    SELECT summary_cursor, recent_summary_cursor, canonical_state_cursor
+    SELECT summary_cursor, recent_summary_cursor, canonical_state_cursor, context_target_index
     FROM session_memory
     WHERE session_id = ?
     """;
@@ -15,6 +15,11 @@ final class ApplicationStorageQueries {
   static final String UPDATE_CURSORS = """
     UPDATE session_memory
     SET summary_cursor = ?, recent_summary_cursor = ?, canonical_state_cursor = ?
+    WHERE session_id = ?
+    """;
+  static final String UPDATE_CONTEXT_TARGET = """
+    UPDATE session_memory
+    SET context_target_index = ?
     WHERE session_id = ?
     """;
   static final String SELECT_SUMMARY = "SELECT summary_content FROM session_memory WHERE session_id = ?";

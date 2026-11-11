@@ -17,12 +17,29 @@ public interface StoryRepository {
 
   List<PastStoryExchange> loadPastExchanges(String sessionId, List<Integer> messageIndexes);
 
-  StoryTurnRecord appendTurn(
+  default StoryTurnRecord appendTurn(
     String sessionId,
     String userInput,
     String assistantResponse,
     StoryImage image,
     Instant updatedAt
+  ) {
+    return appendTurn(sessionId, userInput, assistantResponse, image, updatedAt, 0);
+  }
+
+  /**
+   * Appends a completed turn and, in the same transaction, raises the durable request frontier
+   * ({@code context_target_index}) to {@code contextTarget} via {@code GREATEST}. A non-positive
+   * {@code contextTarget} leaves the frontier untouched, so callers that do not plan a rolling
+   * context can ignore it. The frontier is only written here, after a successful generation.
+   */
+  StoryTurnRecord appendTurn(
+    String sessionId,
+    String userInput,
+    String assistantResponse,
+    StoryImage image,
+    Instant updatedAt,
+    int contextTarget
   );
 
   boolean updateAssistantMessage(String sessionId, int messageIndex, String content, Instant updatedAt);

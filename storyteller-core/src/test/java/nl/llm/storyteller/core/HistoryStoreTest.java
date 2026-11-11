@@ -185,6 +185,80 @@ class HistoryStoreTest {
         assertEquals("assistant-3", lastTurn.assistantResponse());
     }
 
+    @Test
+    @DisplayName("""
+        Given a stored history with a request frontier,
+        When the memory layers write, a turn records a higher frontier, and a turn is undone,
+        Then the frontier should survive memory writes, grow on append, and clamp back on undo
+        """)
+    void shouldGrowTheRequestFrontierOnAppendAndClampItOnUndo() throws Exception {
+        Path tempDirectory = Files.createTempDirectory("storyteller-history-frontier");
+        HistoryStore historyStore = new HistoryStore(
+            tempDirectory.resolve("history.json"), tempDirectory.resolve("history.md"));
+        historyStore.save(new HistoryState(
+            List.of(
+                new Message("user", "user-1"),
+                new Message("assistant", "assistant-1"),
+                new Message("user", "user-2"),
+                new Message("assistant", "assistant-2"),
+                new Message("user", "user-3"),
+                new Message("assistant", "assistant-3")
+            ),
+            0,
+            0,
+            0,
+            6
+        ));
+        assertEquals(6, historyStore.load().contextTargetIndex());
+
+        historyStore.markSummarized(2);
+        historyStore.markRecentSummarized(2);
+        historyStore.markCanonicalStateUpdated(2);
+        HistoryState afterMemory = historyStore.load();
+        assertEquals(2, afterMemory.summaryCursor());
+        assertEquals(2, afterMemory.recentSummaryCursor());
+        assertEquals(2, afterMemory.canonicalStateCursor());
+        assertEquals(6, afterMemory.contextTargetIndex());
+
+        historyStore.appendTurn("user-4", "assistant-4", 8);
+        HistoryState afterAppend = historyStore.load();
+        assertEquals(8, afterAppend.messages().size());
+        assertEquals(8, afterAppend.contextTargetIndex());
+
+        historyStore.removeLastTurn();
+        HistoryState afterUndo = historyStore.load();
+        assertEquals(6, afterUndo.messages().size());
+        assertEquals(6, afterUndo.contextTargetIndex());
+        assertEquals(2, afterUndo.recentSummaryCursor());
+
+        historyStore.appendTurn("user-5", "assistant-5");
+        assertEquals(6, historyStore.load().contextTargetIndex());
+    }
+
+    @Test
+    @DisplayName("""
+        Given a history.json written before the request frontier existed,
+        When the history store is loaded,
+        Then the request frontier should read back as zero
+        """)
+    void shouldReadAnAbsentRequestFrontierAsZeroForOlderFiles() throws Exception {
+        Path tempDirectory = Files.createTempDirectory("storyteller-history-legacy-frontier");
+        Path historyFile = tempDirectory.resolve("history.json");
+        Files.writeString(historyFile, """
+            {
+              "messages": [
+                {"role": "user", "content": "user-1"},
+                {"role": "assistant", "content": "assistant-1"}
+              ],
+              "summary_cursor": 1,
+              "recent_summary_cursor": 1,
+              "canonical_state_cursor": 1
+            }
+            """);
+        HistoryStore historyStore = new HistoryStore(historyFile, tempDirectory.resolve("history.md"));
+        assertEquals(0, historyStore.load().contextTargetIndex());
+    }
+
     private static Stream<Arguments> recentTurnCases() {
         return Stream.of(
             Arguments.of(1, List.of("user-3", "assistant-3")),

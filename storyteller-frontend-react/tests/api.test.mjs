@@ -140,13 +140,13 @@ test('Given a same-origin deployment, When loading binary resources, Then their 
 });
 
 
-test('Given a build opened through 127.0.0.1, When calling the default API, Then the API uses that same host', async () => {
+test('Given a same-origin build opened through 127.0.0.1, When calling the default API, Then the request stays same-origin', async () => {
   const original = Object.getOwnPropertyDescriptor(globalThis, 'location');
   try {
     Object.defineProperty(globalThis, 'location', { configurable: true, value: { hostname: '127.0.0.1' } });
-    const { api: builtApi } = loadModule('api', 'http://localhost:7090');
+    const { api: builtApi } = loadModule('api', '');
     const { requests } = await capture(() => builtApi.currentSession());
-    assert.equal(requests[0].url, 'http://127.0.0.1:7090/v1/session');
+    assert.equal(requests[0].url, '/v1/session', 'A relative default base follows whatever host serves the SPA');
   } finally {
     if (original) Object.defineProperty(globalThis, 'location', original);
     else delete globalThis.location;

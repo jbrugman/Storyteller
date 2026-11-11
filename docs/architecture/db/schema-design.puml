@@ -55,6 +55,7 @@ entity session_memory {
   summary_cursor : INTEGER
   recent_summary_cursor : INTEGER
   canonical_state_cursor : INTEGER
+  context_target_index : INTEGER
 }
 
 entity turn_state {

@@ -13,6 +13,9 @@ public final class AppConfig {
   private static final String OPTION_SEED = "seed";
   private static final String OPTION_MAX_TOKENS = "max_tokens";
 
+  public static final String CONTEXT_MODE_TURNS = "turns";
+  public static final String CONTEXT_MODE_ROLLING = "rolling";
+
   private final Path baseDir;
   private final ModelAccessConfig modelAccess;
   private final FilesConfig files;
@@ -110,6 +113,15 @@ public final class AppConfig {
     }
     if (recentSummaryMaxTurns() < maxRecentTurns()) {
       throw new IllegalArgumentException("recentSummary.maxRecentTurns must be >= chat.maxRecentTurns.");
+    }
+    if (!CONTEXT_MODE_TURNS.equalsIgnoreCase(contextMode()) && !CONTEXT_MODE_ROLLING.equalsIgnoreCase(contextMode())) {
+      throw new IllegalArgumentException("chat.contextMode must be turns or rolling.");
+    }
+    if (contextWindow() < 0) {
+      throw new IllegalArgumentException("chat.contextWindow must be 0 for unknown, or a positive token count.");
+    }
+    if (responseReserveTokens() < 0) {
+      throw new IllegalArgumentException("chat.responseReserveTokens must be 0 or a positive token count.");
     }
     if (summaryBatchMessages() < 1 || recentSummaryBatchMessages() < 1 || canonicalStateBatchMessages() < 1
       || graphTurnBasedBatchTurns() < 1) {
@@ -323,6 +335,23 @@ public final class AppConfig {
 
   public int maxRecentTurns() {
     return conversation.maxRecentTurns();
+  }
+
+  /** Response cap configured for chat requests, or 0 when the backend decides the response length. */
+  public int chatMaxTokens() {
+    return conversation.chatMaxTokens();
+  }
+
+  public String contextMode() {
+    return conversation.contextMode();
+  }
+
+  public int contextWindow() {
+    return conversation.contextWindow();
+  }
+
+  public int responseReserveTokens() {
+    return conversation.responseReserveTokens();
   }
 
   public int summaryBatchMessages() {
@@ -561,6 +590,10 @@ public final class AppConfig {
       source.optionalTrimmedString("database.encryption.key"),
       new ConversationConfig(
         source.requiredInt("chat.maxRecentTurns"),
+        source.optionalInt("chat.maxTokens", 0),
+        source.requiredString("chat.contextMode"),
+        source.requiredInt("chat.contextWindow"),
+        source.requiredInt("chat.responseReserveTokens"),
         source.requiredInt("recentSummary.maxRecentTurns"),
         source.requiredInt("summary.batchMessages"),
         source.requiredInt("recentSummary.batchMessages"),
@@ -711,6 +744,10 @@ public final class AppConfig {
 
   private record ConversationConfig(
     int maxRecentTurns,
+    int chatMaxTokens,
+    String contextMode,
+    int contextWindow,
+    int responseReserveTokens,
     int recentSummaryMaxTurns,
     int summaryBatchMessages,
     int recentSummaryBatchMessages,

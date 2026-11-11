@@ -11,7 +11,9 @@ public record SessionSettings(
   Boolean streamingEnabled,
   Boolean validationEnabled,
   Boolean graphEnabled,
-  Integer maxTokens
+  Integer maxTokens,
+  String contextMode,
+  Integer contextWindow
 ) {
   public SessionSettings {
     if (Boolean.TRUE.equals(streamingEnabled) && Boolean.TRUE.equals(validationEnabled)) {
@@ -48,7 +50,30 @@ public record SessionSettings(
     this(prompts, knowledgeGraph, temperature, streamingEnabled, validationEnabled, graphEnabled, null);
   }
 
+  public SessionSettings(
+    SessionPrompts prompts,
+    KnowledgeGraphDocument knowledgeGraph,
+    Double temperature,
+    Boolean streamingEnabled,
+    Boolean validationEnabled,
+    Boolean graphEnabled,
+    Integer maxTokens
+  ) {
+    this(prompts, knowledgeGraph, temperature, streamingEnabled, validationEnabled, graphEnabled, maxTokens,
+      null, null);
+  }
+
   public SessionSettings(SessionPrompts prompts, KnowledgeGraphDocument knowledgeGraph) {
     this(prompts, knowledgeGraph, null);
+  }
+
+  /** Whether this session picks its own context mode, or inherits chat.contextMode. */
+  public String contextMode(String defaultValue) {
+    return contextMode != null && !contextMode.isBlank() ? contextMode : defaultValue;
+  }
+
+  /** Whether this session knows the model's window, or inherits chat.contextWindow. */
+  public int contextWindow(int defaultValue) {
+    return contextWindow != null ? contextWindow : defaultValue;
   }
 }

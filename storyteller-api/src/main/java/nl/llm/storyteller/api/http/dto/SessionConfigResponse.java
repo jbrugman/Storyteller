@@ -14,5 +14,9 @@ public record SessionConfigResponse(
   boolean effectiveValidationEnabled,
   boolean effectiveGraphEnabled,
   Integer maxTokens,
-  Integer effectiveMaxTokens
+  Integer effectiveMaxTokens,
+  String contextMode,
+  String effectiveContextMode,
+  Integer contextWindow,
+  Integer effectiveContextWindow
 ) { }

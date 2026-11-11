@@ -17,6 +17,8 @@ CREATE TABLE session_configuration (
   streaming_enabled BOOLEAN,
   graph_enabled BOOLEAN,
   max_tokens INTEGER,
+  context_mode VARCHAR(16),
+  context_window INTEGER,
   PRIMARY KEY (session_id),
   FOREIGN KEY (session_id) REFERENCES story_session (session_id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_bin;
@@ -50,11 +52,13 @@ CREATE TABLE session_memory (
   summary_cursor INTEGER NOT NULL,
   recent_summary_cursor INTEGER NOT NULL,
   canonical_state_cursor INTEGER NOT NULL,
+  context_target_index INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (session_id),
   FOREIGN KEY (session_id) REFERENCES story_session (session_id) ON DELETE CASCADE,
   CHECK (summary_cursor >= 0),
   CHECK (recent_summary_cursor >= 0),
-  CHECK (canonical_state_cursor >= 0)
+  CHECK (canonical_state_cursor >= 0),
+  CHECK (context_target_index >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_bin;
 
 CREATE TABLE turn_state (

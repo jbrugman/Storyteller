@@ -5,6 +5,8 @@ import nl.llm.storyteller.core.JsonSupport;
 import nl.llm.storyteller.core.config.AppConfigLoader;
 import nl.llm.storyteller.core.model.Message;
 import nl.llm.storyteller.core.service.ChatClient;
+import nl.llm.storyteller.db.Database;
+import nl.llm.storyteller.db.JdbcSessionMemoryRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -716,6 +718,103 @@ class ApiServerTest {
     assertTrue(systemMessage.contains("Response zero"));
   }
 
+  @Test
+  @DisplayName("""
+    Given a session in rolling context mode,
+    When repeated turns no longer fit in the configured context window,
+    Then every turn persists the absolute boundary of the history it still sent verbatim
+    """)
+  void shouldPersistAnAbsoluteRollingRequestFrontier() throws Exception {
+    int turns = 8;
+    Path coreOverride = temporaryDirectory.resolve("rolling-frontier.config");
+    Files.writeString(coreOverride, """
+      validation.enabled=false
+      chat.contextMode=rolling
+      chat.contextWindow=4096
+      chat.responseReserveTokens=0
+      """);
+    List<String> responses = new ArrayList<>();
+    for (int turn = 1; turn <= turns; turn++) {
+      responses.add(rollingResponse(turn));
+    }
+    RecordingChatClient storyClient = new RecordingChatClient(responses);
+    server = ApiServer.create(
+      config(), AppConfigLoader.load(temporaryDirectory, coreOverride), storyClient, storyClient
+    );
+    server.start();
+    HttpClient client = HttpClient.newHttpClient();
+    String sessionId = createSession(client);
+
+    int storedFrontier = 0;
+    for (int turn = 0; turn < turns; turn++) {
+      HttpResponse<String> submitted = submitTurn(client, sessionId, "Rolling prompt " + turn);
+      assertEquals(200, submitted.statusCode());
+      // The request is the system frame, the verbatim history and the current prompt.
+      int verbatim = storyClient.requests().get(turn).size() - 2;
+      int expectedFrontier = turn * 2 - verbatim;
+      assertEquals(0, expectedFrontier % 2,
+        "a frontier must sit on a turn boundary, so trimming never separates a reply from its prompt");
+      assertTrue(expectedFrontier >= 0 && expectedFrontier <= turn * 2,
+        "a frontier must stay inside the history this session has: " + expectedFrontier);
+      int persistedFrontier = requestFrontier(sessionId);
+      assertEquals(Math.max(storedFrontier, expectedFrontier), persistedFrontier,
+        "turn " + turn + " must raise the frontier to the first message it still sent verbatim");
+      storedFrontier = persistedFrontier;
+    }
+
+    assertTrue(storedFrontier > 0, "a story larger than the window must record that older turns rolled off");
+    assertTrue(storedFrontier < (turns - 1) * 2,
+      "the newest turn must still go out verbatim instead of only living in derived memory");
+    List<Message> finalRequest = storyClient.requests().getLast();
+    assertEquals("system", finalRequest.getFirst().role());
+    assertEquals("Rolling prompt " + (turns - 1), finalRequest.getLast().content());
+    assertFalse(finalRequest.stream().anyMatch(message -> message.content().contains("Rolling prompt 0")),
+      "the oldest turn must have rolled out of the request once the window filled");
+  }
+
+  @Test
+  @DisplayName("""
+    Given a rolling session that already recorded a request frontier,
+    When the model backend fails a turn,
+    Then the failed turn leaves the frontier where it was
+    """)
+  void shouldLeaveTheRequestFrontierUnchangedWhenGenerationFails() throws Exception {
+    int successfulTurns = 4;
+    Path coreOverride = temporaryDirectory.resolve("rolling-failure.config");
+    Files.writeString(coreOverride, """
+      validation.enabled=false
+      chat.contextMode=rolling
+      chat.contextWindow=4096
+      chat.responseReserveTokens=0
+      """);
+    int[] attempts = {0};
+    ChatClient chatClient = (_, _, _) -> {
+      if (attempts[0]++ < successfulTurns) {
+        return rollingResponse(attempts[0]);
+      }
+      throw new java.io.IOException("OpenAI-compatible backend returned HTTP 503: model unavailable");
+    };
+    server = ApiServer.create(
+      config(), AppConfigLoader.load(temporaryDirectory, coreOverride), chatClient, chatClient
+    );
+    server.start();
+    HttpClient client = HttpClient.newHttpClient();
+    String sessionId = createSession(client);
+    for (int turn = 0; turn < successfulTurns; turn++) {
+      assertEquals(200, submitTurn(client, sessionId, "Rolling prompt " + turn).statusCode());
+    }
+
+    int frontierBeforeFailure = requestFrontier(sessionId);
+    assertTrue(frontierBeforeFailure > 0, "a frontier has to exist before a failure can leave it alone");
+
+    HttpResponse<String> failed = submitTurn(client, sessionId, "Prompt after the failure");
+
+    assertEquals(502, failed.statusCode());
+    assertTrue(failed.body().contains("model_backend_error"));
+    assertEquals(frontierBeforeFailure, requestFrontier(sessionId),
+      "a turn that never reached the model must not move the frontier, because it dropped no history");
+  }
+
   @ParameterizedTest
   @CsvSource({
     "'', , 0.6",
@@ -901,7 +1000,20 @@ class ApiServerTest {
     return URI.create("http://127.0.0.1:" + server.port() + path);
   }
 
+  /** A reply long enough that the small rolling window used by the frontier tests fills after a couple of turns. */
+  private static String rollingResponse(int turn) {
+    return "Rolling response " + turn + ": " + "x".repeat(4000);
+  }
+
+  /** The durable request frontier of a session, read straight from the database the server writes to. */
+  private int requestFrontier(String sessionId) {
+    return new JdbcSessionMemoryRepository(
+      new Database(config().databaseUrl(), "sa", "")
+    ).load(sessionId).contextTargetIndex();
+  }
+
   private static final class RecordingChatClient implements ChatClient {
+
     private final List<String> responses;
     private final List<List<Message>> requests = new ArrayList<>();
 

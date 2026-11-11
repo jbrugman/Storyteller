@@ -155,7 +155,8 @@ public final class ApiServer implements AutoCloseable {
       sessionService, cookieService, bundleService
     );
     SessionSettingsService settingsService = new SessionSettingsService(settingsRepository, graphValidator,
-      coreConfig.streamingEnabled(), coreConfig.validationEnabled(), coreConfig.graphEnabled());
+      coreConfig.streamingEnabled(), coreConfig.validationEnabled(), coreConfig.graphEnabled(),
+      coreConfig.contextMode(), coreConfig.contextWindow(), coreConfig.responseReserveTokens());
     var atlasService = new SessionAtlasService(
       settingsService, PredicateCatalog.load(coreConfig.baseDir())
     );
@@ -206,6 +207,21 @@ public final class ApiServer implements AutoCloseable {
       }
       javalinConfig.fileRenderer(new JavalinJte(TemplateEngine.createPrecompiled(ContentType.Html)));
       javalinConfig.staticFiles.add("/public", Location.CLASSPATH);
+      // Same-origin React SPA (bundled onto the classpath as "app" by the CI build); served under
+      // /app so it reaches /v1 and session cookies without any baked-in host, on any machine or
+      // port. Registered only when the SPA is actually present, so JTE-only and offline builds (and
+      // the test/server harnesses) start unchanged; Javalin rejects a missing classpath directory.
+      if (ApiServer.class.getResource("/app/index.html") != null) {
+        javalinConfig.staticFiles.add(react -> {
+          react.directory = "app";
+          react.location = Location.CLASSPATH;
+          react.hostedPath = "/app";
+        });
+        // Serve the SPA shell explicitly: Javalin's static directory handler self-redirects
+        // "/app/", so the shell is returned directly and only hashed assets fall through to static.
+        javalinConfig.routes.get("/app", ApiServer::serveReactApp);
+        javalinConfig.routes.get("/app/", ApiServer::serveReactApp);
+      }
       if (tlsMaterial != null) {
         javalinConfig.routes.get("/storyteller-ca.crt", context -> {
           context.contentType("application/x-x509-ca-cert");
@@ -250,6 +266,16 @@ public final class ApiServer implements AutoCloseable {
     } catch (IOException ex) {
       throw new UncheckedIOException("Could not create the API database directory.", ex);
     }
+  }
+
+  private static void serveReactApp(io.javalin.http.Context context) {
+    var index = ApiServer.class.getResourceAsStream("/app/index.html");
+    if (index == null) {
+      context.status(404);
+      return;
+    }
+    context.contentType("text/html; charset=utf-8");
+    context.result(index);
   }
 
   public void start() {

@@ -797,7 +797,8 @@ textarea {
 
 /* Temperature slider */
 .temperature-fieldset,
-.max-tokens-fieldset {
+.max-tokens-fieldset,
+.context-fieldset {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 1rem 1.25rem;
@@ -805,7 +806,9 @@ textarea {
 }
 
 .temperature-fieldset > label,
-.max-tokens-fieldset > label {
+.max-tokens-fieldset > label,
+.context-fieldset > label,
+.context-fieldset legend {
   display: block;
   font-weight: 600;
   margin-bottom: 0.3rem;
@@ -813,6 +816,19 @@ textarea {
 
 .max-tokens-fieldset input[type="number"] {
   max-width: 12rem;
+}
+
+.context-fieldset input[type="number"],
+.context-fieldset select {
+  max-width: 16rem;
+}
+
+.context-warning {
+  margin: 0 0 1rem;
+}
+
+.context-warning a {
+  color: inherit;
 }
 
 .setting-hint {

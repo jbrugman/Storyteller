@@ -45,6 +45,10 @@ export interface SessionConfig {
   effectiveGraphEnabled: boolean;
   maxTokens: number | null;
   effectiveMaxTokens: number | null;
+  contextMode: string | null;
+  effectiveContextMode: 'turns' | 'rolling';
+  contextWindow: number | null;
+  effectiveContextWindow: number;
 }
 
 export class ApiError extends Error {
@@ -115,12 +119,10 @@ export interface TurnOptions {
   pastMessageIndexes?: number[];
 }
 
-// Vite embeds the API origin in dist; development uses the same-origin proxy.
+// Set by Vite from VITE_API_BASE_URL (empty by default); see vite.config.ts.
 declare const __STORYTELLER_API_BASE_URL__: string;
-// Keep loopback hosts consistent so SameSite session cookies also work via 127.0.0.1.
-const apiBaseUrl = __STORYTELLER_API_BASE_URL__ === 'http://localhost:7090'
-  && globalThis.location?.hostname === '127.0.0.1'
-  ? 'http://127.0.0.1:7090' : __STORYTELLER_API_BASE_URL__;
+// Default base is relative, so the SPA talks to the very origin that served it (any host/IP/port).
+const apiBaseUrl = __STORYTELLER_API_BASE_URL__;
 const apiUrl = (path: string) => `${apiBaseUrl.replace(/\/+$/, '')}/v1${path}`;
 
 // A string body is sent unchanged so raw JSON, such as a knowledge graph, is not encoded twice.
@@ -182,7 +184,7 @@ export const api = {
   createSession: (title: string) => request<Session>('/sessions', 'POST', { title }),
   history: (id: string, page?: HistoryPage) => request<SessionHistory>(`${sessionPath(id)}/history${historyQuery(page)}`),
   config: (id: string) => request<SessionConfig>(`${sessionPath(id)}/config`),
-  saveConfig: (id: string, settings: Pick<SessionConfig, 'systemPrompt' | 'fixedProtagonists' | 'rules' | 'temperature' | 'streamingEnabled' | 'validationEnabled' | 'graphEnabled' | 'maxTokens'>) =>
+  saveConfig: (id: string, settings: Pick<SessionConfig, 'systemPrompt' | 'fixedProtagonists' | 'rules' | 'temperature' | 'streamingEnabled' | 'validationEnabled' | 'graphEnabled' | 'maxTokens' | 'contextMode' | 'contextWindow'>) =>
     request<SessionConfig>(`${sessionPath(id)}/config`, 'PATCH', settings),
   resumeSession: (id: string) => request<Session>(`${sessionPath(id)}/resume`, 'POST'),
   importSession: (bundle: File) => {

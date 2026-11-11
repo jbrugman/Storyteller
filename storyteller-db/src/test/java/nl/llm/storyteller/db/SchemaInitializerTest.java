@@ -128,6 +128,64 @@ class SchemaInitializerTest {
     assertEquals(Double.valueOf(0.75), loaded.temperature(), "The stored temperature survives the upgrade");
   }
 
+
+  @Test
+  @DisplayName("""
+    Given an existing database without context mode and window columns,
+    When schema initialization runs twice,
+    Then both additive columns are added and stored choices are preserved
+    """)
+  void shouldMigrateContextSettings() throws Exception {
+    Database database = database();
+    var initializer = new SchemaInitializer(database);
+    initializer.initialize();
+    var now = java.time.Instant.now();
+    new JdbcSessionRepository(database).create(
+      new SessionRecord("session", "Story", now, now, now, now.plusSeconds(3600), false),
+      new SessionPrompts("System", "Fixed", "Rules"));
+    var repository = new JdbcSessionSettingsRepository(database);
+    repository.patchConfiguration("session", ConfigurationPatch.context("rolling", 8192));
+    try (var connection = database.openConnection(); var statement = connection.createStatement()) {
+      statement.execute("ALTER TABLE session_configuration DROP COLUMN context_mode");
+      statement.execute("ALTER TABLE session_configuration DROP COLUMN context_window");
+    }
+
+    initializer.initialize();
+    initializer.initialize();
+
+    assertTrue(hasColumn(database, "SESSION_CONFIGURATION", "CONTEXT_MODE"));
+    assertTrue(hasColumn(database, "SESSION_CONFIGURATION", "CONTEXT_WINDOW"));
+    org.junit.jupiter.api.Assertions.assertNull(
+      new JdbcSessionSettingsRepository(database).load("session").contextMode(),
+      "The dropped column is recreated empty, so sessions inherit again");
+  }
+
+  @Test
+  @DisplayName("""
+    Given an existing database whose memory table predates the request frontier,
+    When schema initialization runs twice,
+    Then the additive frontier column is added at zero so stored memory layers stay in charge
+    """)
+  void shouldMigrateContextTargetIndex() throws Exception {
+    Database database = database();
+    var initializer = new SchemaInitializer(database);
+    initializer.initialize();
+    var now = java.time.Instant.now();
+    new JdbcSessionRepository(database).create(
+      new SessionRecord("session", "Story", now, now, now, now.plusSeconds(3600), false),
+      new SessionPrompts("System", "Fixed", "Rules"));
+    try (var connection = database.openConnection(); var statement = connection.createStatement()) {
+      statement.execute("ALTER TABLE session_memory DROP COLUMN context_target_index");
+    }
+
+    initializer.initialize();
+    initializer.initialize();
+
+    assertTrue(hasColumn(database, "SESSION_MEMORY", "CONTEXT_TARGET_INDEX"));
+    assertEquals(0, new JdbcSessionMemoryRepository(database).load("session").contextTargetIndex(),
+      "An upgraded session starts with no frontier, so nothing is condensed before a rolling turn records one");
+  }
+
   private Database database() {
     return new Database("jdbc:h2:file:" + temporaryDirectory.resolve("schema"), "sa", "");
   }

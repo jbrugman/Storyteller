@@ -10,5 +10,7 @@ public record SessionConfigPatchRequest(
   JsonNode streamingEnabled,
   JsonNode validationEnabled,
   JsonNode graphEnabled,
-  JsonNode maxTokens
+  JsonNode maxTokens,
+  JsonNode contextMode,
+  JsonNode contextWindow
 ) { }

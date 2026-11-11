@@ -13,12 +13,12 @@
     <module>storyteller-core</module>
     <module>storyteller-db</module>
     <module>storyteller-cli</module>
-    <module>storyteller-api</module>
     <module>storyteller-frontend-react</module>
+    <module>storyteller-api</module>
   </modules>
 
   <properties>
-    <revision>2.1.8</revision>
+    <revision>2.2.0</revision>
     <maven.compiler.release>25</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <jackson.version>2.22.4</jackson.version>

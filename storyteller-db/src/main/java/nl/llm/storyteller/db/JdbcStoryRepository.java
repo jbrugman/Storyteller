@@ -163,9 +163,21 @@ public final class JdbcStoryRepository implements StoryRepository {
     StoryImage image,
     Instant updatedAt
   ) {
+    return appendTurn(sessionId, userInput, assistantResponse, image, updatedAt, 0);
+  }
+
+  @Override
+  public StoryTurnRecord appendTurn(
+    String sessionId,
+    String userInput,
+    String assistantResponse,
+    StoryImage image,
+    Instant updatedAt,
+    int contextTarget
+  ) {
     try (Connection connection = database.openConnection()) {
       connection.setAutoCommit(false);
-      return appendInTransaction(connection, sessionId, userInput, assistantResponse, image, updatedAt);
+      return appendInTransaction(connection, sessionId, userInput, assistantResponse, image, updatedAt, contextTarget);
     } catch (SQLException ex) {
       throw new DatabaseException("Could not append story turn for session " + sessionId + ".", ex);
     }
@@ -274,7 +286,8 @@ public final class JdbcStoryRepository implements StoryRepository {
       statement.setInt(1, remainingMessageCount);
       statement.setInt(2, remainingMessageCount);
       statement.setInt(3, remainingMessageCount);
-      statement.setString(4, sessionId);
+      statement.setInt(4, remainingMessageCount);
+      statement.setString(5, sessionId);
       statement.executeUpdate();
     }
   }
@@ -302,7 +315,8 @@ public final class JdbcStoryRepository implements StoryRepository {
     String userInput,
     String assistantResponse,
     StoryImage image,
-    Instant updatedAt
+    Instant updatedAt,
+    int contextTarget
   ) throws SQLException {
     try {
       int userMessageIndex = nextMessageIndex(connection, sessionId);
@@ -310,11 +324,29 @@ public final class JdbcStoryRepository implements StoryRepository {
       int assistantMessageIndex = userMessageIndex + 1;
       insertMessage(connection, sessionId, assistantMessageIndex, ASSISTANT, assistantResponse, null);
       updateSession(connection, sessionId, updatedAt);
+      raiseContextTarget(connection, sessionId, contextTarget);
       connection.commit();
       return new StoryTurnRecord(userMessageIndex, assistantMessageIndex);
     } catch (SQLException ex) {
       rollback(connection, ex);
       throw ex;
+    }
+  }
+
+  /**
+   * Raises the durable request frontier to {@code contextTarget} with {@code GREATEST}, so it never
+   * moves backwards. A non-positive target is a no-op. The update runs on the append transaction, so a
+   * turn and the boundary derived memory must condense toward commit or roll back together.
+   */
+  private void raiseContextTarget(Connection connection, String sessionId, int contextTarget)
+    throws SQLException {
+    if (contextTarget <= 0) {
+      return;
+    }
+    try (PreparedStatement statement = connection.prepareStatement(StoryQueries.RAISE_CONTEXT_TARGET)) {
+      statement.setInt(1, contextTarget);
+      statement.setString(2, sessionId);
+      statement.executeUpdate();
     }
   }
 

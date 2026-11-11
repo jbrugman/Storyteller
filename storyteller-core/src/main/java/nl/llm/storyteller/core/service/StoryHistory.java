@@ -10,7 +10,17 @@ public interface StoryHistory {
 
   void save(HistoryState state);
 
-  void appendTurn(String userInput, String assistantResponse);
+  default void appendTurn(String userInput, String assistantResponse) {
+    appendTurn(userInput, assistantResponse, 0);
+  }
+
+  /**
+   * Appends a completed turn and records the durable request frontier ({@code contextTargetIndex}) as
+   * {@code max(existing, contextTarget)}, so derived memory can later condense toward the boundary the
+   * request actually left behind. A non-positive {@code contextTarget} leaves the frontier untouched, so
+   * turns-mode callers and older data are unaffected.
+   */
+  void appendTurn(String userInput, String assistantResponse, int contextTarget);
 
   String removeLastTurn();
 

@@ -453,8 +453,19 @@ The app does not send the full history back to the model. It sends:
   long-term summary
   recent summary
   relevant knowledge-graph facts
-- the last `chat.maxRecentTurns` raw turns
+- recent raw turns, as many as `chat.contextMode` allows
 - the latest user message
+
+`chat.contextMode=turns`, the default, sends the last `chat.maxRecentTurns` raw turns. `chat.contextMode=rolling`
+fills the model's window instead: it measures the first system message, adds the reply space kept free by
+`chat.responseReserveTokens` or a higher response limit, and sends as many whole recent turns as the remaining
+`chat.contextWindow` tokens hold. The combined system message never rolls off, only turns do, and they are dropped from
+the oldest end so a turn is never separated from its answer. A window of `0` means the model's size is unknown, and
+rolling then behaves like turns mode while the history page explains why. Token counts are estimated pessimistically at
+three characters per token plus a per-message overhead; the model server stays the authority on its real window, so a
+tight setting warns the user instead of silently losing context. The frame is measured with everything the turn
+also appends, including the instruction the terminal adds when a protagonist acts out of turn, so that instruction
+costs context and pushes an older turn out instead of letting the request overshoot the window.
 
 This single-system-message layout improves compatibility with stricter OpenAI-compatible chat templates, including LM Studio model templates that require the system message to appear only at the beginning of the conversation.
 
@@ -476,12 +487,28 @@ The storyteller uses three database-backed derived memory layers beside the late
 These values and their processing cursors are stored in the active H2 session. Files named `recent-summary.md`,
 `summary.md`, and `canonical-state.yaml` are used only as legacy migration input or as entries in a session ZIP.
 
+In rolling context mode the layers condense toward a boundary the request itself records: the index of the first
+history message the newest successful turn still sent verbatim. Everything below that boundary is recent
+context, everything at or above it has to live in a summary. The boundary only moves forward and only together with a
+turn that reached the model, and an undo rewinds it with the three cursors. Turns mode stores zero, so its layers keep
+following `chat.maxRecentTurns` and `recentSummary.maxRecentTurns` unchanged.
+
+Whether the middle layer exists follows the same split. In turns mode it only runs while `recentSummary.maxRecentTurns`
+reaches beyond the turns sent verbatim, because otherwise every recent turn still goes out raw; an active rolling window
+always has it, because the recorded boundary says what to condense and the turn counts only cap how much of that the
+layer holds. A rolling session whose window is unknown plans no window, so both layers keep the turns-mode rule.
+
 This keeps prompt size down while preserving continuity.
 
 Important runtime detail:
 - the foreground story turn stays synchronous for prompt assembly, model response, validation, and history append
 - the three derived-memory refreshes are triggered asynchronously afterward
 - the three memory refreshes, automatic turn-based graph extraction, and manual `/graph -fill` generation share one single-threaded task queue, so their LLM calls run sequentially; background work does not block the current story response, while `/graph -fill` deliberately waits for earlier queued work and its own result
+- because a rolling turn records its boundary before the layers catch up, a story can miss its oldest dropped turns in
+  both raw history and summaries until a refresh catches up; the lag is not bounded, and a batch threshold or a failing
+  refresh leaves it open rather than closing it on the next turn
+- an undo rewinds the boundary and the cursors but never shortens summary text already written, so the next refresh
+  re-reads the restored turn on top of a summary that already covers it
 
 ## Runtime Structure
 
@@ -602,6 +629,41 @@ Not yet.
 ```
 
 ## Changelog
+### 2.2.0
+- Added a rolling context mode. A request is now assembled from the model's context window instead of a message count:
+  the system prompt, canonical state, summaries and knowledge-graph facts always go out, and as many whole recent turns
+  as the window leaves room for follow. Older turns are dropped from the oldest end and reach the model through their
+  summaries, so a smaller model keeps a long story without sending all of it.
+- History layers follow one rolling boundary instead of a fixed turn count: the mid-term layer condenses what a request
+  left behind into a recent window capped by `recentSummary.maxRecentTurns`, and the long-term layer condenses what the
+  mid-term layer already consumed. Both runtimes apply those rules identically, so the CLI and the API build the same
+  memory out of the same settings.
+- In rolling mode `recentSummary.maxRecentTurns` is a window cap and no longer an on/off switch: a session whose
+  mid-term window equals `chat.maxRecentTurns` still condenses the turns a request dropped, instead of losing them from
+  raw history and from every summary. An unknown window keeps both layers on the turns-mode rule, because that session
+  still sends turn counts.
+- The rolling frame is measured with the instruction a turn-based turn appends when a protagonist acts out of turn, so
+  that instruction pays for itself out of the window instead of pushing a request past the configured size.
+- A rolling turn records the boundary it actually sent: the index of the first history message that still went out
+  verbatim. It is stored on the turn's own append and only after the model answered, so a failed turn never moves it,
+  and an undo pulls it back together with the layer cursors so a layer can re-read a restored turn. Turns mode keeps the
+  boundary at zero, which leaves its memory layout exactly as its turn counts describe it.
+- Condensing stays asynchronous, so the layers can lag the boundary a request already used and that lag has no upper
+  bound: until a refresh has run and enough messages accumulated for its batch threshold, the oldest dropped turns are
+  in neither raw history nor a summary, and refreshes that keep failing keep the gap open for as long as they fail.
+- Context mode and window are configurable per session in the API, the built-in interface and the React example, and
+  default to the server's `chat.contextMode`, `chat.contextWindow` and `chat.responseReserveTokens`. An unknown window
+  keeps turns-mode behaviour and says so rather than guessing a model's size.
+- Rolling context weighs a turn's attached image and each message's fixed framing, so a turn carrying an image can no
+  longer survive a window with no room for it, and an empty message is counted for its framing too.
+- A session settings PATCH changes only the fields it sends: updating the context window keeps the context mode and
+  vice versa, leaving a field out changes nothing, and an explicit null lets the session inherit the server setting.
+- The history page reports what the next request would send, and a story warns when the configured window no longer
+  holds the prompts and memory that always go out.
+- The built-in interface no longer posts a streamed turn after the streaming setting changed elsewhere. It asks the
+  server at submit time and falls back to an ordinary turn, and a failed request now reports the server's reason
+  instead of only "Generation could not start."
+
 ### 2.1.8
 - Kept the static wireframe aligned with the built-in interface. Its settings page now shows the Response generation (streaming and validation) 
   and the Knowledge graph option, matching the production template, its order and its default choices.

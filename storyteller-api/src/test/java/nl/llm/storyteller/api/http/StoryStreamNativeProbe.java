@@ -25,17 +25,19 @@ public final class StoryStreamNativeProbe {
 
   static void verifyCompletion() throws Exception {
     String response = "Voltooid \"antwoord\"\nvolgende regel 🦉";
+    String warning = "The context window leaves only 40 tokens for recent turns.";
     String body = capture(onText -> {
       onText.accept(response);
-      return new StoryTurnResult(12, 13, response);
+      return new StoryTurnResult(12, 13, response, warning);
     });
     if (body.contains("event: error")) throw new AssertionError(body);
     var completions = Arrays.stream(body.split("\n\n"))
       .filter(frame -> frame.startsWith("event: done\ndata: ")).toList();
     if (completions.size() != 1) throw new AssertionError("Expected exactly one completion event: " + body);
     var data = JsonSupport.OBJECT_MAPPER.readTree(completions.getFirst().substring("event: done\ndata: ".length()));
-    if (data.size() != 3 || data.path("userMessageIndex").asInt() != 12
-      || data.path("assistantMessageIndex").asInt() != 13 || !response.equals(data.path("response").asText())) {
+    if (data.size() != 4 || data.path("userMessageIndex").asInt() != 12
+      || data.path("assistantMessageIndex").asInt() != 13 || !response.equals(data.path("response").asText())
+      || !warning.equals(data.path("contextWarning").asText())) {
       throw new AssertionError("Completion payload changed: " + data);
     }
   }

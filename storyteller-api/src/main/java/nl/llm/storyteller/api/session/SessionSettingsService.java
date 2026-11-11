@@ -4,7 +4,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import nl.llm.storyteller.core.JsonSupport;
 import nl.llm.storyteller.core.graph.KnowledgeGraphValidator;
 import nl.llm.storyteller.core.graph.model.KnowledgeGraphDocument;
+import nl.llm.storyteller.core.config.AppConfig;
 import nl.llm.storyteller.core.graph.persistence.KnowledgeGraphJsonCodec;
+import nl.llm.storyteller.db.ConfigurationPatch;
 import nl.llm.storyteller.db.SessionPrompts;
 import nl.llm.storyteller.db.SessionSettings;
 import nl.llm.storyteller.db.SessionSettingsRepository;
@@ -16,19 +18,34 @@ import static nl.llm.storyteller.api.input.TextInputNormalizer.requiredMultiline
 public final class SessionSettingsService {
   private static final int MAX_PROMPT_LENGTH = 1_000_000;
   private static final int MAX_TOKENS_LIMIT = 1_000_000;
+  private static final int MAX_CONTEXT_WINDOW_LIMIT = 100_000_000;
   private final SessionSettingsRepository repository;
   private final KnowledgeGraphValidator graphValidator;
   private final boolean defaultStreaming;
   private final boolean defaultValidation;
   private final boolean defaultGraph;
+  private final String defaultContextMode;
+  private final int defaultContextWindow;
+  private final int defaultResponseReserveTokens;
   private final KnowledgeGraphJsonCodec graphCodec = new KnowledgeGraphJsonCodec();
 
   public SessionSettingsService(SessionSettingsRepository repository, KnowledgeGraphValidator graphValidator) {
-    this(repository, graphValidator, false, true, true);
+    this(repository, graphValidator, false, true, true,
+      AppConfig.CONTEXT_MODE_TURNS, 0, 0);
   }
 
   public SessionSettingsService(SessionSettingsRepository repository, KnowledgeGraphValidator graphValidator,
     boolean defaultStreaming, boolean defaultValidation, boolean defaultGraph) {
+    this(repository, graphValidator, defaultStreaming, defaultValidation, defaultGraph,
+      AppConfig.CONTEXT_MODE_TURNS, 0, 0);
+  }
+
+  public SessionSettingsService(SessionSettingsRepository repository, KnowledgeGraphValidator graphValidator,
+    boolean defaultStreaming, boolean defaultValidation, boolean defaultGraph, String defaultContextMode,
+    int defaultContextWindow, int defaultResponseReserveTokens) {
+    this.defaultContextMode = defaultContextMode;
+    this.defaultContextWindow = defaultContextWindow;
+    this.defaultResponseReserveTokens = defaultResponseReserveTokens;
     this.defaultStreaming = defaultStreaming;
     this.defaultValidation = defaultValidation;
     this.defaultGraph = defaultGraph;
@@ -56,7 +73,8 @@ public final class SessionSettingsService {
     FixedProtagonistsValidator.validate(prompts.fixedProtagonists());
     SessionSettings current = repository.load(sessionId);
     repository.save(sessionId, new SessionSettings(prompts, parseKnowledgeGraph(knowledgeGraph), temperature,
-      current.streamingEnabled(), current.validationEnabled(), current.graphEnabled(), current.maxTokens()));
+      current.streamingEnabled(), current.validationEnabled(), current.graphEnabled(), current.maxTokens(),
+      current.contextMode(), current.contextWindow()));
   }
 
   public boolean streamingEnabled(SessionSettings settings) {
@@ -71,6 +89,29 @@ public final class SessionSettingsService {
     return settings.graphEnabled(defaultGraph);
   }
 
+  public String contextMode(SessionSettings settings) {
+    return settings.contextMode(defaultContextMode);
+  }
+
+  public int contextWindow(SessionSettings settings) {
+    return settings.contextWindow(defaultContextWindow);
+  }
+
+  /** The server's mode, shown by the settings form as what an empty session choice means. */
+  public String defaultContextMode() {
+    return defaultContextMode;
+  }
+
+  /** The server's context window, shown by the settings form as what an empty session window means. */
+  public int defaultContextWindow() {
+    return defaultContextWindow;
+  }
+
+  /** Space the server keeps free for a reply while a rolling context is assembled. */
+  public int responseReserveTokens() {
+    return defaultResponseReserveTokens;
+  }
+
   public void validateGeneration(Boolean streaming, Boolean validation) {
     if ((streaming != null ? streaming : defaultStreaming)
       && (validation != null ? validation : defaultValidation)) {
@@ -81,15 +122,24 @@ public final class SessionSettingsService {
   public void save(String sessionId, String systemPrompt, String fixedProtagonists, String rules,
     String knowledgeGraph, Double temperature, Boolean streaming, Boolean validation, Boolean graph,
     Integer maxTokens) {
+    save(sessionId, systemPrompt, fixedProtagonists, rules, knowledgeGraph, temperature, streaming, validation,
+      graph, maxTokens, null, null);
+  }
+
+  public void save(String sessionId, String systemPrompt, String fixedProtagonists, String rules,
+    String knowledgeGraph, Double temperature, Boolean streaming, Boolean validation, Boolean graph,
+    Integer maxTokens, String contextMode, Integer contextWindow) {
     validateGeneration(streaming, validation);
     validateMaxTokens(maxTokens);
+    validateContextMode(contextMode);
+    validateContextWindow(contextWindow);
     SessionPrompts prompts = new SessionPrompts(
       requiredMultiline(systemPrompt, "System prompt", MAX_PROMPT_LENGTH),
       requiredMultiline(fixedProtagonists, "Fixed protagonists", MAX_PROMPT_LENGTH),
       requiredMultiline(rules, "Rules", MAX_PROMPT_LENGTH));
     FixedProtagonistsValidator.validate(prompts.fixedProtagonists());
     repository.save(sessionId, new SessionSettings(prompts, parseKnowledgeGraph(knowledgeGraph), temperature,
-      streaming, validation, graph, maxTokens));
+      streaming, validation, graph, maxTokens, blankToNull(contextMode), contextWindow));
   }
 
   public String formatKnowledgeGraph(SessionSettings settings) {
@@ -117,6 +167,16 @@ public final class SessionSettingsService {
     String rules, boolean updateTemperature, Double temperature, boolean updateStreaming, Boolean streaming,
     boolean updateValidation, Boolean validation, boolean updateGraph, Boolean graph,
     boolean updateMaxTokens, Integer maxTokens) {
+    patchConfiguration(sessionId, systemPrompt, fixedProtagonists, rules, updateTemperature, temperature,
+      updateStreaming, streaming, updateValidation, validation, updateGraph, graph, updateMaxTokens, maxTokens,
+      false, null, false, null);
+  }
+
+  public synchronized void patchConfiguration(String sessionId, String systemPrompt, String fixedProtagonists,
+    String rules, boolean updateTemperature, Double temperature, boolean updateStreaming, Boolean streaming,
+    boolean updateValidation, Boolean validation, boolean updateGraph, Boolean graph,
+    boolean updateMaxTokens, Integer maxTokens, boolean updateContextMode, String contextMode,
+    boolean updateContextWindow, Integer contextWindow) {
     SessionSettings current = repository.load(sessionId);
     Boolean effectiveStreaming = updateStreaming ? streaming : current.streamingEnabled();
     Boolean effectiveValidation = updateValidation ? validation : current.validationEnabled();
@@ -141,9 +201,41 @@ public final class SessionSettingsService {
     if (updateMaxTokens) {
       validateMaxTokens(maxTokens);
     }
-    repository.patchConfiguration(sessionId, prompts, updateTemperature, temperature,
+    if (updateContextMode) {
+      validateContextMode(contextMode);
+    }
+    if (updateContextWindow) {
+      validateContextWindow(contextWindow);
+    }
+    repository.patchConfiguration(sessionId, new ConfigurationPatch(prompts, updateTemperature, temperature,
       updateStreaming || updateValidation || updateGraph, effectiveStreaming, effectiveValidation,
-      updateGraph, effectiveGraph, updateMaxTokens, maxTokens);
+      updateGraph, effectiveGraph, updateMaxTokens, maxTokens, updateContextMode, blankToNull(contextMode),
+      updateContextWindow, contextWindow));
+  }
+
+  /**
+   * A session may choose its own context mode and window, and each is validated on its own so a patch
+   * carrying one of them cannot reject or overwrite the other. An empty mode means inherit, a window of
+   * zero means the model's size is unknown, and rolling mode without a known window is accepted on
+   * purpose: it then behaves like turns mode and the context report tells the user why.
+   */
+  private static void validateContextMode(String contextMode) {
+    if (contextMode != null && !contextMode.isBlank()
+      && !AppConfig.CONTEXT_MODE_TURNS.equalsIgnoreCase(contextMode)
+      && !AppConfig.CONTEXT_MODE_ROLLING.equalsIgnoreCase(contextMode)) {
+      throw new IllegalArgumentException("contextMode must be turns, rolling, or null to inherit.");
+    }
+  }
+
+  private static void validateContextWindow(Integer contextWindow) {
+    if (contextWindow != null && (contextWindow < 0 || contextWindow > MAX_CONTEXT_WINDOW_LIMIT)) {
+      throw new IllegalArgumentException("contextWindow must be null, 0 for an unknown window, or a number up to "
+        + MAX_CONTEXT_WINDOW_LIMIT + ".");
+    }
+  }
+
+  private static String blankToNull(String value) {
+    return value == null || value.isBlank() ? null : value;
   }
 
   private static void validateMaxTokens(Integer maxTokens) {

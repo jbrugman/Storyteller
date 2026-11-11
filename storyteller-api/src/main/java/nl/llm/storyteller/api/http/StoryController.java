@@ -91,7 +91,8 @@ public final class StoryController {
       sessionId,
       result.userMessageIndex(),
       result.assistantMessageIndex(),
-      result.response()
+      result.response(),
+      result.contextWarning()
     ));
   }
 

@@ -4,7 +4,7 @@ import type { Theme } from './theme';
 import { graphHasData } from './knowledge-graph';
 import type { GraphAction } from './knowledge-graph';
 
-export type EditableSettings = Pick<SessionConfig, 'systemPrompt' | 'fixedProtagonists' | 'rules' | 'temperature' | 'streamingEnabled' | 'validationEnabled' | 'graphEnabled' | 'maxTokens'>;
+export type EditableSettings = Pick<SessionConfig, 'systemPrompt' | 'fixedProtagonists' | 'rules' | 'temperature' | 'streamingEnabled' | 'validationEnabled' | 'graphEnabled' | 'maxTokens' | 'contextMode' | 'contextWindow'>;
 interface Props {
   config: SessionConfig;
   busy: boolean;
@@ -35,9 +35,14 @@ export default function SettingsPage({ config, busy, theme, graphText, onGraphTe
   const [temperature, setTemperature] = useState(config.temperature ?? config.effectiveTemperature ?? 1);
   const [useDefaultTokens, setUseDefaultTokens] = useState(config.maxTokens === null);
   const [maxTokens, setMaxTokens] = useState(config.maxTokens ?? config.effectiveMaxTokens ?? 0);
+  const [contextMode, setContextMode] = useState(config.contextMode ?? '');
+  const [useDefaultWindow, setUseDefaultWindow] = useState(config.contextWindow === null);
+  const [contextWindow, setContextWindow] = useState(config.contextWindow ?? config.effectiveContextWindow ?? 0);
   const currentSettings = (): EditableSettings => ({
     systemPrompt, fixedProtagonists, rules, temperature: useDefault ? null : temperature, streamingEnabled, validationEnabled, graphEnabled,
     maxTokens: useDefaultTokens ? null : maxTokens,
+    contextMode: contextMode === '' ? null : contextMode,
+    contextWindow: useDefaultWindow ? null : contextWindow,
   });
   const runGraphAction = (action: GraphAction) => {
     if (!graphHasData(graphText) || window.confirm(graphWarnings[action])) onGraphAction(action, currentSettings());
@@ -110,6 +115,22 @@ export default function SettingsPage({ config, busy, theme, graphText, onGraphTe
           onChange={event => setUseDefaultTokens(event.target.checked)} />Use server default</label>
         <input type="number" id="maxTokens" min={0} max={1000000} step={1} value={maxTokens}
           disabled={useDefaultTokens} onChange={event => setMaxTokens(Number(event.target.value))} />
+      </fieldset>
+      <fieldset className="context-fieldset" disabled={busy}>
+        <legend>Context window</legend>
+        <label htmlFor="contextMode">Recent story sent verbatim</label>
+        <select id="contextMode" value={contextMode} onChange={event => setContextMode(event.target.value)}>
+          <option value="">Server default</option>
+          <option value="turns">Turns</option>
+          <option value="rolling">Rolling window</option>
+        </select>
+        <p className="setting-hint">Turns sends the configured number of recent turns. Rolling fills the model's context window with as many recent turns as still fit: the prompts, canonical state, summaries and this turn always go out, and the older story reaches the model through its summaries. Leaving it on Server default follows the server's chat.contextMode, currently {config.effectiveContextMode}. Saved per session in the database.</p>
+        <label htmlFor="contextWindow">Model context window (tokens)</label>
+        <label className="example-default"><input type="checkbox" checked={useDefaultWindow}
+          onChange={event => setUseDefaultWindow(event.target.checked)} />Use server default</label>
+        <input type="number" id="contextWindow" min={0} max={100000000} step={1} value={contextWindow}
+          disabled={useDefaultWindow} onChange={event => setContextWindow(Number(event.target.value))} />
+        <p className="setting-hint">Rolling mode needs to know how large the model's window is. Use the server default to follow the server, or enter 0 when the size is unknown; rolling then sends the recent turns of turns mode and the history page says so. A model that needs room for its reasoning also needs it counted here. Range: 0 to 100000000. Saved per session in the database.</p>
       </fieldset>
       <div className="graph-tools" aria-label="Knowledge graph actions">
         <span>Graph tools</span>

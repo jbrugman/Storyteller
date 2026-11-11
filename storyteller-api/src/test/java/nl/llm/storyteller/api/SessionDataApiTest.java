@@ -32,6 +32,8 @@ class SessionDataApiTest {
 
   private final HttpClient client = HttpClient.newHttpClient();
   private final AtomicReference<Map<String, Object>> chatOptions = new AtomicReference<>();
+  // The prompt as the model receives it, so context assembly can be asserted without a real model.
+  private final AtomicReference<List<nl.llm.storyteller.core.model.Message>> chatMessages = new AtomicReference<>();
   private final AtomicInteger modelRequests = new AtomicInteger();
   private ApiServer server;
   private ApiConfig config;
@@ -96,6 +98,114 @@ class SessionDataApiTest {
     assertEquals(256, restored.path("effectiveMaxTokens").asInt(), "Null returns to the server limit");
     assertEquals(200, request("POST", "/turns", "{\"prompt\":\"Once more\"}").statusCode());
     assertEquals(256, chatOptions.get().get("max_tokens"), "The inherited server limit caps the turn again");
+  }
+
+  @Test
+  @DisplayName("""
+    Given a server context default and a session that overrides it,
+    When configuration is read and patched,
+    Then the raw and effective context choices and the context report stay in step
+    """)
+  void shouldExposeAndPatchContextSettings() throws Exception {
+    startSession("chat.contextWindow=8192\n");
+    JsonNode original = json(request("GET", "/config", null));
+    assertTrue(original.path("contextMode").isNull(), "A fresh session inherits the server's context mode");
+    assertEquals("turns", original.path("effectiveContextMode").asText());
+    assertTrue(original.path("contextWindow").isNull(), "A fresh session inherits the server's context window");
+    assertEquals(8192, original.path("effectiveContextWindow").asInt(), "The server window is the effective one");
+
+    JsonNode rolling = json(request("PATCH", "/config", "{\"contextMode\":\"rolling\",\"contextWindow\":200000}"));
+    assertEquals("rolling", rolling.path("contextMode").asText(), "The session choice persists as its own value");
+    assertEquals("rolling", rolling.path("effectiveContextMode").asText());
+    assertEquals(200000, rolling.path("effectiveContextWindow").asInt());
+
+    JsonNode context = json(request("GET", "/state", null)).path("context");
+    assertEquals("rolling", context.path("mode").asText());
+    assertEquals(200000, context.path("contextWindow").asInt());
+    assertTrue(context.path("requiredTokens").asInt() > 0, "Prompts and reserved reply space are measured");
+    assertEquals(0, context.path("totalMessages").asInt(), "Nothing is persisted yet");
+    assertEquals(0, context.path("verbatimMessages").asInt());
+    assertEquals(0, context.path("summarizedMessages").asInt());
+    assertEquals("", context.path("warning").asText(), "A window this large leaves nothing to warn about");
+
+    JsonNode inherited = json(request("PATCH", "/config", "{\"contextMode\":null,\"contextWindow\":null}"));
+    assertTrue(inherited.path("contextMode").isNull(), "Null returns the mode to the server default");
+    assertEquals("turns", inherited.path("effectiveContextMode").asText());
+    assertEquals(8192, inherited.path("effectiveContextWindow").asInt(), "Null returns the window to the server default");
+  }
+
+  @Test
+  @DisplayName("""
+    Given a session that chose rolling mode and its own window,
+    When a patch submits only one of the two context settings,
+    Then only that setting changes and the other keeps the session's own choice
+    """)
+  void shouldPatchOneContextSettingWithoutTouchingTheOther() throws Exception {
+    startSession("chat.contextWindow=8192\n");
+    assertEquals(200, request("PATCH", "/config",
+      "{\"contextMode\":\"rolling\",\"contextWindow\":200000}").statusCode());
+
+    JsonNode windowOnly = json(request("PATCH", "/config", "{\"contextWindow\":16384}"));
+    assertEquals("rolling", windowOnly.path("contextMode").asText(),
+      "A patch carrying only the window must keep the mode this session chose");
+    assertEquals(16384, windowOnly.path("effectiveContextWindow").asInt(), "The submitted window takes effect");
+
+    JsonNode modeOnly = json(request("PATCH", "/config", "{\"contextMode\":\"turns\"}"));
+    assertEquals("turns", modeOnly.path("contextMode").asText(), "The submitted mode takes effect");
+    assertEquals(16384, modeOnly.path("effectiveContextWindow").asInt(),
+      "A patch carrying only the mode must keep the window this session chose");
+
+    JsonNode inherited = json(request("PATCH", "/config", "{\"contextWindow\":null}"));
+    assertTrue(inherited.path("contextWindow").isNull(), "An explicit null still inherits the server window");
+    assertEquals("turns", inherited.path("contextMode").asText(), "The mode remains the session's own choice");
+  }
+
+  @Test
+  @DisplayName("""
+    Given rolling mode with a window too small for the context that always goes out,
+    When turns are submitted and a fitting window is chosen,
+    Then the answer warns, no history is sent verbatim, and the recent story returns with a larger window
+    """)
+  void shouldWarnAndDropHistoryWhenTheRollingWindowIsTooSmall() throws Exception {
+    startSession("chat.contextMode=rolling\nchat.contextWindow=1024\n");
+    HttpResponse<String> first = request("POST", "/turns", "{\"prompt\":\"First\"}");
+    assertEquals(200, first.statusCode(), "A too small window warns instead of failing the turn");
+    String warning = json(first).path("contextWarning").asText();
+    assertTrue(warning.contains("context window"), "The turn answer carries the actionable warning: " + warning);
+    assertEquals(2, chatMessages.get().size(), "Only the system message and the new prompt go out");
+
+    assertEquals(200, request("PATCH", "/config", "{\"contextWindow\":200000}").statusCode());
+    HttpResponse<String> second = request("POST", "/turns", "{\"prompt\":\"Second\"}");
+    assertEquals(200, second.statusCode());
+    assertEquals("", json(second).path("contextWarning").asText(), "A fitting window has nothing to warn about");
+    assertEquals(4, chatMessages.get().size(), "The previous exchange goes out verbatim again");
+
+    JsonNode context = json(request("GET", "/state", null)).path("context");
+    assertEquals(4, context.path("totalMessages").asInt());
+    assertEquals(4, context.path("verbatimMessages").asInt(), "Rolling mode fills the window rather than counting turns");
+    assertEquals(0, context.path("summarizedMessages").asInt());
+    assertEquals("", context.path("warning").asText());
+  }
+
+  @Test
+  @DisplayName("""
+    Given rolling mode without a known context window,
+    When turns are submitted,
+    Then the recent turns of turns mode still go out and the report explains the missing window
+    """)
+  void shouldFallBackToTurnsAndExplainAnUnknownWindow() throws Exception {
+    startSession("chat.contextMode=rolling\n");
+    assertEquals(200, request("POST", "/turns", "{\"prompt\":\"First\"}").statusCode());
+
+    JsonNode context = json(request("GET", "/state", null)).path("context");
+    assertEquals("rolling", context.path("mode").asText());
+    assertEquals(0, context.path("contextWindow").asInt(), "Zero means the window size is unknown");
+    assertTrue(context.path("warning").asText().contains("needs a context window"),
+      "The report says why rolling mode cannot measure: " + context.path("warning").asText());
+
+    assertEquals(200, request("POST", "/turns", "{\"prompt\":\"Second\"}").statusCode());
+    assertEquals(4, chatMessages.get().size(),
+      "An unknown window falls back to the recent turns of turns mode instead of dropping the story");
   }
 
   @Test
@@ -230,6 +340,8 @@ class SessionDataApiTest {
       "{\"temperature\":true}", "{\"rules\":null}", "{\"systemPrompt\":0}",
       "{\"maxTokens\":-1}", "{\"maxTokens\":1000001}", "{\"maxTokens\":\"512\"}",
       "{\"maxTokens\":true}", "{\"maxTokens\":1.5}",
+      "{\"contextMode\":\"bogus\"}", "{\"contextMode\":5}", "{\"contextWindow\":-1}",
+      "{\"contextWindow\":100000001}", "{\"contextWindow\":1.5}", "{\"contextWindow\":\"4096\"}",
       "{\"rules\":\"  \"}", "{\"systemPrompt\":\"Changed\",\"fixedProtagonists\":\"invalid yaml\"}"
     )) {
       HttpResponse<String> response = request("PATCH", "/config", patch);
@@ -280,6 +392,7 @@ class SessionDataApiTest {
     ChatClient model = (messages, options, timeout) -> {
       modelRequests.incrementAndGet();
       chatOptions.set(Map.copyOf(options));
+      chatMessages.set(List.copyOf(messages));
       return "Story response";
     };
     server = ApiServer.create(config, AppConfigLoader.load(temporaryDirectory, coreOverride), model, model);

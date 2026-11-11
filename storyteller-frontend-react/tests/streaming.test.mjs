@@ -110,3 +110,47 @@ test('Given an empty story, When JTE generation fails without text, Then the emp
   assert.deepEqual(conversation.children, [empty]);
   assert.equal(empty.hidden, false);
 });
+
+const jsonResponse = body => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
+function streamEnabled(fetchImpl, dataset = { streamUrl: '/stream', configUrl: '/config' }) {
+  const context = vm.createContext({ window: {}, fetch: fetchImpl });
+  vm.runInContext(source, context);
+  return context.window.StoryStreaming.streamEnabled({ dataset });
+}
+
+test('Given a session with streaming enabled, When JTE asks at submit, Then only an explicit true decides to stream', async () => {
+  assert.equal(await streamEnabled(async () => jsonResponse({ effectiveStreamingEnabled: true })), true);
+});
+
+for (const [label, body] of [
+  ['streaming off', { effectiveStreamingEnabled: false }],
+  ['a missing field', {}],
+  ['a non-boolean truthy value', { effectiveStreamingEnabled: 1 }],
+  ['a stringified false', { effectiveStreamingEnabled: 'false' }],
+]) {
+  test(`Given ${label}, When JTE asks at submit, Then the composer posts its plain form`, async () => {
+    assert.equal(await streamEnabled(async () => jsonResponse(body)), false);
+  });
+}
+
+for (const [label, fetchImpl] of [
+  ['an unsuccessful answer', async () => new Response('{"effectiveStreamingEnabled":true}', { status: 502 })],
+  ['a rejected request', async () => { throw new Error('Network unavailable'); }],
+]) {
+  test(`Given ${label} at submit, When JTE cannot read the setting, Then it costs streaming and never a turn`, async () => {
+    assert.equal(await streamEnabled(fetchImpl), false);
+  });
+}
+
+test('Given a composer without a config URL, When JTE asks at submit, Then it asks nothing and posts its plain form', async () => {
+  let asked = 0;
+  const decided = await streamEnabled(async () => { asked++; return jsonResponse({ effectiveStreamingEnabled: true }); },
+    { streamUrl: '/stream' });
+  assert.equal(decided, false);
+  assert.equal(asked, 0, 'No config URL means no request to the server');
+});
+
+test('Given the page rendered with streaming on, When the setting changed off since then, Then submit does not stream', async () => {
+  const streaming = await streamEnabled(async () => jsonResponse({ effectiveStreamingEnabled: false }));
+  assert.equal(streaming, false, 'The submit-time answer, not the page render, decides');
+});
