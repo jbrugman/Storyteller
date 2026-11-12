@@ -1071,6 +1071,68 @@ class ApiServerTest {
     assertEquals(String.format("%.2f", expected), output.group(1).trim());
   }
 
+
+  @Test
+  @DisplayName("Editing a response through the story form replaces it")
+  void shouldEditResponseThroughTheStoryForm() throws Exception {
+    Path coreOverride = temporaryDirectory.resolve("edit-web-core.config");
+    Files.writeString(coreOverride, "validation.enabled=true\n");
+    RecordingChatClient storyClient = new RecordingChatClient(List.of("A door opens in the old library."));
+    RecordingChatClient validationClient = new RecordingChatClient(List.of("{\"decision\":\"ALLOW\"}"));
+    server = ApiServer.create(
+      config(),
+      AppConfigLoader.load(temporaryDirectory, coreOverride),
+      storyClient,
+      validationClient
+    );
+    server.start();
+    HttpClient client = HttpClient.newHttpClient();
+
+    HttpResponse<String> created = client.send(
+      HttpRequest.newBuilder(uri("/web/sessions"))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .POST(HttpRequest.BodyPublishers.ofString("title=The+Library"))
+        .build(),
+      HttpResponse.BodyHandlers.ofString()
+    );
+    String cookie = created.headers().firstValue("Set-Cookie").orElseThrow();
+    String cookiePair = cookie.substring(0, cookie.indexOf(';'));
+
+    byte[] png = java.util.Base64.getDecoder().decode(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jVj8AAAAASUVORK5CYII=");
+    String boundary = "storyteller-repro-boundary";
+    HttpResponse<String> submitted = client.send(
+      HttpRequest.newBuilder(uri("/story/turns"))
+        .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+        .header("Cookie", cookiePair)
+        .POST(HttpRequest.BodyPublishers.ofByteArray(multipartTurn(boundary, "Open the door", png)))
+        .build(),
+      HttpResponse.BodyHandlers.ofString()
+    );
+
+    HttpResponse<String> edited = client.send(
+      HttpRequest.newBuilder(uri("/story/messages/1/edit"))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .header("Cookie", cookiePair)
+        .POST(HttpRequest.BodyPublishers.ofString("content=" + encode("Edited through the story form")))
+        .build(),
+      HttpResponse.BodyHandlers.ofString()
+    );
+
+    HttpResponse<String> story = client.send(
+      HttpRequest.newBuilder(uri("/story")).header("Cookie", cookiePair).GET().build(),
+      HttpResponse.BodyHandlers.ofString()
+    );
+
+    assertEquals(303, submitted.statusCode(), "the turn should have been accepted");
+    assertEquals(303, edited.statusCode(), "the web edit form should redirect after saving, got status "
+      + edited.statusCode() + " body:\n" + edited.body());
+    assertEquals(200, story.statusCode());
+    assertTrue(story.body().contains("Edited through the story form"),
+      "the /story page should show the edited response");
+    assertFalse(story.body().contains("A door opens in the old library."),
+      "the original response should be gone after editing");
+  }
   private String settingsForm(
     String systemPrompt,
     String fixedProtagonists,

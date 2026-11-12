@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Session } from './api';
-import { pairExchanges } from './story-exchanges';
+import { pairExchanges, editAssistantIndex } from './story-exchanges';
 
 interface Props {
   session: Session;
@@ -181,7 +181,7 @@ export default function StoryPage({
                 event.preventDefault();
                 const content = new FormData(event.currentTarget).get('content');
                 if (typeof content === 'string' && content.trim()) {
-                  onEditMessage(exchange.response!.messageIndex + 1, content);
+                  onEditMessage(editAssistantIndex(exchange), content);
                   setEditing(null);
                 }
               }}>

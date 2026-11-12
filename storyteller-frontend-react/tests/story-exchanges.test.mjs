@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadModule } from './helpers/modules.mjs';
 
-const { pairExchanges } = loadModule('story-exchanges');
+const { pairExchanges, editAssistantIndex } = loadModule('story-exchanges');
 const message = (messageIndex, role) => ({ messageIndex, role, content: `${role} ${messageIndex}`, hasImage: false });
 
 test('Given adjacent prompt and response, When pairing, Then they form one exchange', () => {
@@ -31,4 +31,14 @@ test('Given messages, When pairing, Then the input array is not mutated', () => 
   const snapshot = structuredClone(messages);
   pairExchanges(messages);
   assert.deepEqual(messages, snapshot);
+});
+
+test('Given a paired exchange, When choosing the edit index, Then it is the assistant index, not the next message', () => {
+  const [exchange] = pairExchanges([message(0, 'user'), message(1, 'assistant')]);
+  assert.equal(editAssistantIndex(exchange), 1);
+});
+
+test('Given an orphan assistant message, When choosing the edit index, Then it stays that assistant index', () => {
+  const [exchange] = pairExchanges([message(5, 'assistant')]);
+  assert.equal(editAssistantIndex(exchange), 5);
 });
