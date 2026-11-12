@@ -168,6 +168,7 @@ The public API exposes the same operations as the bundled web interface. Respons
 
 | Method | Path | Purpose |
 |---|---|---|
+| `GET` | `/v1/version` | Report which build is answering; no session needed. |
 | `POST` | `/v1/sessions` | Create a database-backed story session. |
 | `GET` | `/v1/session` | Resolve the active browser session. |
 | `POST` | `/v1/session/stop` | Stop the active session and clear its cookie; preserve infinite sessions. |
@@ -224,7 +225,7 @@ response does not embed the image. Retrieve its bytes through `GET /v1/sessions/
 `GET /v1/sessions/{sessionId}/config` returns `200` with `sessionId`, `systemPrompt`, `fixedProtagonists`, `rules`,
 `temperature`, `effectiveTemperature`, `streamingEnabled`, `validationEnabled`, `graphEnabled`,
 `effectiveStreamingEnabled`, `effectiveValidationEnabled`, `effectiveGraphEnabled`, `maxTokens`,
-`effectiveMaxTokens`, `contextMode`, `effectiveContextMode`, `contextWindow`, and `effectiveContextWindow`. Prompt
+`effectiveMaxTokens`, `contextMode`, `effectiveContextMode`, `contextWindow`, `effectiveContextWindow`, and `appVersion`, the version the server was built from. Prompt
 fields contain their stored text; `fixedProtagonists` contains YAML. A null override follows the application default,
 which the matching effective field reports: `chat.temperature` for temperature, `chat.maxTokens` for the maximum tokens
 a single response may use, `chat.contextMode` for how a request is assembled, and `chat.contextWindow` for the model's
@@ -249,7 +250,12 @@ session even when the application configures one, and null restores the `chat.ma
 tokens, `0` declares the size unknown, which makes rolling mode send the recent turns of turns mode while the context
 report explains why, and null inherits `chat.contextWindow`; below `0` or above `100000000` it is rejected. Mode and
 window are validated and updated on their own, so a patch carrying only one of them never rewrites or rejects the
-other. Unknown fields and malformed JSON are rejected with `400` and the existing `invalid_request` error shape.
+other. The one rule spanning them judges the values in effect rather than the fields sent: a patch that puts the session
+itself in `rolling` has to leave it with a window above `0`, whether that size comes from the patch or from what the
+session already stored, and otherwise is rejected with `400` and the `invalid_request` shape without changing anything.
+A session inheriting rolling from `chat.contextMode` stays outside that rule, because an unknown server window is its
+operator's choice and keeps explaining itself through the context report. Unknown fields and malformed JSON are rejected
+with `400` and the existing `invalid_request` error shape.
 
 All supplied fields are validated before persistence and updated in one repository transaction. The patch does not
 rewrite omitted prompts, the knowledge graph, or memory. It returns `200` with the same shape as `GET /config`.

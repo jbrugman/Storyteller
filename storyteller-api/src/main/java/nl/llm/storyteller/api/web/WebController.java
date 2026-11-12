@@ -1,5 +1,6 @@
 package nl.llm.storyteller.api.web;
 
+import nl.llm.storyteller.api.ApiVersion;
 import nl.llm.storyteller.api.input.StoryImageUpload;
 
 import io.javalin.config.JavalinConfig;
@@ -14,6 +15,7 @@ import nl.llm.storyteller.api.story.StoryService;
 import nl.llm.storyteller.db.SessionPrompts;
 import nl.llm.storyteller.db.SessionRecord;
 import nl.llm.storyteller.db.StoryImage;
+import nl.llm.storyteller.api.session.InvalidContextSettingException;
 import nl.llm.storyteller.api.session.InvalidFixedProtagonistsException;
 import nl.llm.storyteller.api.session.InvalidKnowledgeGraphException;
 import nl.llm.storyteller.api.session.SessionCookieService;
@@ -208,6 +210,7 @@ public final class WebController {
     cookieService.write(context, session.get().sessionId(), session.get().infinite());
     var settings = settingsService.load(session.get().sessionId());
     context.render("settings.jte", Map.of(
+      "appVersion", ApiVersion.read(),
       "page", StorySettingsPage.valid(
         settings.prompts(),
         settingsService.formatKnowledgeGraph(settings),
@@ -224,7 +227,8 @@ public final class WebController {
         settings.contextMode() == null ? "" : settings.contextMode(),
         settings.contextWindow() == null ? "" : String.valueOf(settings.contextWindow()),
         settingsService.defaultContextMode(),
-        settingsService.defaultContextWindow()
+        settingsService.defaultContextWindow(),
+        SessionSettingsService.RECOMMENDED_CONTEXT_WINDOW_TOKENS
       )
     ));
   }
@@ -478,9 +482,15 @@ public final class WebController {
       : settingsService.load(sessionId).contextMode();
   }
 
+  /**
+   * The size a save stores. A field that does not apply is disabled and a disabled field is not submitted, so
+   * an absent parameter keeps the stored size, while an empty parameter returns the session to the server's.
+   */
   private Integer submittedContextWindow(Context context, String sessionId) {
-    return context.formParam("contextSettings") != null ? parseContextWindow(context.formParam("contextWindow"))
-      : settingsService.load(sessionId).contextWindow();
+    if (context.formParam("contextSettings") == null || context.formParam("contextWindow") == null) {
+      return settingsService.load(sessionId).contextWindow();
+    }
+    return parseContextWindow(context.formParam("contextWindow"));
   }
 
   private Double parseTemperature(String value) {
@@ -544,7 +554,8 @@ public final class WebController {
       valueOrEmpty(context.formParam("contextMode")),
       context.formParam("contextWindow") == null ? "" : context.formParam("contextWindow"),
       settingsService.defaultContextMode(),
-      settingsService.defaultContextWindow()
+      settingsService.defaultContextWindow(),
+      SessionSettingsService.RECOMMENDED_CONTEXT_WINDOW_TOKENS
     );
     SessionPrompts submittedPrompts = new SessionPrompts(
       valueOrEmpty(systemPrompt), valueOrEmpty(fixedProtagonists), valueOrEmpty(rules)
@@ -556,33 +567,37 @@ public final class WebController {
         submittedContextMode(context, session.sessionId()),
         submittedContextWindow(context, session.sessionId()));
     } catch (InvalidFixedProtagonistsException ex) {
-      context.render("settings.jte", Map.of("page", StorySettingsPage.invalidYaml(
-        submittedPrompts,
-        valueOrEmpty(knowledgeGraph),
-        effectiveTemperature(temperature),
-        ex
-      ), "streamingEnabled", Boolean.TRUE.equals(submittedStreaming(context, session.sessionId())),
-        "validationEnabled", Boolean.TRUE.equals(submittedValidation(context, session.sessionId())),
-        "graphEnabled", Boolean.TRUE.equals(submittedGraph(context, session.sessionId())),
-        "maxTokens", maxTokens == null ? "" : String.valueOf(maxTokens),
-        "defaultMaxTokens", defaultMaxTokens,
-        "context", submittedContext));
+      renderSettingsForm(context, StorySettingsPage.invalidYaml(
+        submittedPrompts, valueOrEmpty(knowledgeGraph), effectiveTemperature(temperature), ex
+      ), session.sessionId(), maxTokens, submittedContext);
       return true;
     } catch (InvalidKnowledgeGraphException ex) {
-      context.render("settings.jte", Map.of("page", StorySettingsPage.invalidKnowledgeGraph(
-        submittedPrompts,
-        valueOrEmpty(knowledgeGraph),
-        effectiveTemperature(temperature),
-        ex
-      ), "streamingEnabled", Boolean.TRUE.equals(submittedStreaming(context, session.sessionId())),
-        "validationEnabled", Boolean.TRUE.equals(submittedValidation(context, session.sessionId())),
-        "graphEnabled", Boolean.TRUE.equals(submittedGraph(context, session.sessionId())),
-        "maxTokens", maxTokens == null ? "" : String.valueOf(maxTokens),
-        "defaultMaxTokens", defaultMaxTokens,
-        "context", submittedContext));
+      renderSettingsForm(context, StorySettingsPage.invalidKnowledgeGraph(
+        submittedPrompts, valueOrEmpty(knowledgeGraph), effectiveTemperature(temperature), ex
+      ), session.sessionId(), maxTokens, submittedContext);
+      return true;
+    } catch (InvalidContextSettingException ex) {
+      renderSettingsForm(context, StorySettingsPage.invalidContext(
+        submittedPrompts, valueOrEmpty(knowledgeGraph), effectiveTemperature(temperature), ex
+      ), session.sessionId(), maxTokens, submittedContext);
       return true;
     }
     return false;
+  }
+
+  /** Redisplays the submitted settings form after a rejected save, so nothing the user typed is lost. */
+  private void renderSettingsForm(Context context, StorySettingsPage page, String sessionId,
+    Integer maxTokens, StoryContextPage submittedContext) {
+    context.render("settings.jte", Map.of(
+      "appVersion", ApiVersion.read(),
+      "page", page,
+      "streamingEnabled", Boolean.TRUE.equals(submittedStreaming(context, sessionId)),
+      "validationEnabled", Boolean.TRUE.equals(submittedValidation(context, sessionId)),
+      "graphEnabled", Boolean.TRUE.equals(submittedGraph(context, sessionId)),
+      "maxTokens", maxTokens == null ? "" : String.valueOf(maxTokens),
+      "defaultMaxTokens", defaultMaxTokens,
+      "context", submittedContext
+    ));
   }
 
   private String valueOrEmpty(String value) {

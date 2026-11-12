@@ -19,6 +19,8 @@ public final class SessionSettingsService {
   private static final int MAX_PROMPT_LENGTH = 1_000_000;
   private static final int MAX_TOKENS_LIMIT = 1_000_000;
   private static final int MAX_CONTEXT_WINDOW_LIMIT = 100_000_000;
+  /** What the interfaces offer as a starting point when a session chooses rolling without a known model. */
+  public static final int RECOMMENDED_CONTEXT_WINDOW_TOKENS = 32_768;
   private final SessionSettingsRepository repository;
   private final KnowledgeGraphValidator graphValidator;
   private final boolean defaultStreaming;
@@ -133,6 +135,8 @@ public final class SessionSettingsService {
     validateMaxTokens(maxTokens);
     validateContextMode(contextMode);
     validateContextWindow(contextWindow);
+    validateChosenRollingWindow(blankToNull(contextMode),
+      contextWindow != null ? contextWindow : defaultContextWindow);
     SessionPrompts prompts = new SessionPrompts(
       requiredMultiline(systemPrompt, "System prompt", MAX_PROMPT_LENGTH),
       requiredMultiline(fixedProtagonists, "Fixed protagonists", MAX_PROMPT_LENGTH),
@@ -207,6 +211,9 @@ public final class SessionSettingsService {
     if (updateContextWindow) {
       validateContextWindow(contextWindow);
     }
+    Integer windowInEffect = updateContextWindow ? contextWindow : current.contextWindow();
+    String chosenMode = updateContextMode ? blankToNull(contextMode) : current.contextMode();
+    validateChosenRollingWindow(chosenMode, windowInEffect != null ? windowInEffect : defaultContextWindow);
     repository.patchConfiguration(sessionId, new ConfigurationPatch(prompts, updateTemperature, temperature,
       updateStreaming || updateValidation || updateGraph, effectiveStreaming, effectiveValidation,
       updateGraph, effectiveGraph, updateMaxTokens, maxTokens, updateContextMode, blankToNull(contextMode),
@@ -215,15 +222,30 @@ public final class SessionSettingsService {
 
   /**
    * A session may choose its own context mode and window, and each is validated on its own so a patch
-   * carrying one of them cannot reject or overwrite the other. An empty mode means inherit, a window of
-   * zero means the model's size is unknown, and rolling mode without a known window is accepted on
-   * purpose: it then behaves like turns mode and the context report tells the user why.
+   * carrying one of them cannot reject or overwrite the other. An empty mode means inherit and a window
+   * of zero means the model's size is unknown.
    */
   private static void validateContextMode(String contextMode) {
     if (contextMode != null && !contextMode.isBlank()
       && !AppConfig.CONTEXT_MODE_TURNS.equalsIgnoreCase(contextMode)
       && !AppConfig.CONTEXT_MODE_ROLLING.equalsIgnoreCase(contextMode)) {
       throw new IllegalArgumentException("contextMode must be turns, rolling, or null to inherit.");
+    }
+  }
+
+  /**
+   * A session that names rolling itself has to name the window it wants to fill, because a rolling plan
+   * without a size silently sends turn counts instead. Inheriting the server's mode stays outside the
+   * rule: a server running rolling without a size is its operator's choice and keeps explaining itself
+   * through the context report, which is also what a session in turns mode still does.
+   */
+  private static void validateChosenRollingWindow(String sessionMode, Integer effectiveWindow) {
+    if (AppConfig.CONTEXT_MODE_ROLLING.equalsIgnoreCase(sessionMode == null ? "" : sessionMode)
+      && (effectiveWindow == null || effectiveWindow <= 0)) {
+      throw new InvalidContextSettingException(
+        "Rolling context needs the model's context window before it can be saved. Give it the model's size in"
+          + " tokens, or " + RECOMMENDED_CONTEXT_WINDOW_TOKENS + " to start with, and a model that reserves room"
+          + " for its reasoning counted in that size too.");
     }
   }
 

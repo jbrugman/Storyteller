@@ -113,6 +113,8 @@ class SessionDataApiTest {
     assertEquals("turns", original.path("effectiveContextMode").asText());
     assertTrue(original.path("contextWindow").isNull(), "A fresh session inherits the server's context window");
     assertEquals(8192, original.path("effectiveContextWindow").asInt(), "The server window is the effective one");
+    assertEquals(ApiVersion.read(), original.path("appVersion").asText(),
+      "The configuration names the build that answers, so an interface can be matched to its artefact");
 
     JsonNode rolling = json(request("PATCH", "/config", "{\"contextMode\":\"rolling\",\"contextWindow\":200000}"));
     assertEquals("rolling", rolling.path("contextMode").asText(), "The session choice persists as its own value");
@@ -158,6 +160,34 @@ class SessionDataApiTest {
     JsonNode inherited = json(request("PATCH", "/config", "{\"contextWindow\":null}"));
     assertTrue(inherited.path("contextWindow").isNull(), "An explicit null still inherits the server window");
     assertEquals("turns", inherited.path("contextMode").asText(), "The mode remains the session's own choice");
+  }
+
+  @Test
+  @DisplayName("""
+    Given a server without a known context window,
+    When a session claims rolling mode with and without a size,
+    Then the sizeless request is refused and the sized one is accepted
+    """)
+  void shouldRequireAWindowSizeForAChosenRollingMode() throws Exception {
+    startSession();
+
+    HttpResponse<String> refused = request("PATCH", "/config", "{\"contextMode\":\"rolling\"}");
+    assertEquals(400, refused.statusCode(), refused.body());
+    assertEquals("invalid_request", json(refused).path("code").asText());
+    assertTrue(json(refused).path("message").asText().toLowerCase().contains("context window"),
+      "The error has to name the missing setting: " + refused.body());
+    assertTrue(json(request("GET", "/config", null)).path("contextMode").isNull(),
+      "A refused patch must leave the session inheriting");
+
+    JsonNode accepted = json(request("PATCH", "/config",
+      "{\"contextMode\":\"rolling\",\"contextWindow\":32768}"));
+    assertEquals("rolling", accepted.path("contextMode").asText());
+    assertEquals(32768, accepted.path("effectiveContextWindow").asInt());
+
+    assertEquals(400, request("PATCH", "/config", "{\"contextWindow\":0}").statusCode(),
+      "A rolling session cannot drop back to an unknown window");
+    assertEquals(32768, json(request("GET", "/config", null)).path("effectiveContextWindow").asInt(),
+      "The refused patch leaves the chosen window standing");
   }
 
   @Test

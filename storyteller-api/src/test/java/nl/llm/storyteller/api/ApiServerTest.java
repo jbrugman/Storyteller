@@ -471,6 +471,18 @@ class ApiServerTest {
     assertTrue(settings.body().contains("Replace it with a minimal empty graph?"));
     assertTrue(settings.body().contains("Replace it with facts generated from Fixed protagonists?"));
     assertTrue(settings.body().contains("Remove all turn-based facts and entities?"));
+    List<String> graphOrder = List.of("id=\"knowledgeGraph\"", "id=\"graphEnabled\"",
+      "class=\"graph-tools\"", "<legend>Response generation</legend>");
+    List<Integer> graphPositions = graphOrder.stream().map(marker -> settings.body().indexOf(marker)).toList();
+    assertTrue(graphPositions.stream().allMatch(position -> position >= 0),
+      "Every graph group has to render: " + graphPositions);
+    assertEquals(graphPositions.stream().sorted().toList(), graphPositions,
+      "The graph, its toggle and its tools belong together, ahead of the response settings");
+    int tools = settings.body().indexOf("class=\"graph-tools\"");
+    int graphBlockCloses = settings.body().indexOf("</fieldset>", settings.body().indexOf("id=\"graphEnabled\""));
+    assertTrue(tools < graphBlockCloses,
+      "The tools act on the graph, so they belong inside its block: tools at " + tools
+        + ", block closed at " + graphBlockCloses);
     assertFalse(settings.body().contains(">Cancel</a>"));
     assertEquals(303, resetTurnBasedFacts.statusCode());
     assertTrue(resetTurnBasedFacts.headers().firstValue("Location").orElseThrow()
@@ -876,6 +888,177 @@ class ApiServerTest {
     }
   }
 
+  @Test
+  @DisplayName("""
+    Given a session that chose rolling mode with its own size on a server without a known window,
+    When the settings page renders, a sizeless save is rejected, and a later turns save omits the size,
+    Then only the rejected save is marked and the stored size survives every other save
+    """)
+  void shouldRequireAWindowForRollingSettings() throws Exception {
+    Path coreOverride = temporaryDirectory.resolve("rolling-window.config");
+    Files.writeString(coreOverride, "");
+    ChatClient chatClient = (_, _, _) -> "Unused";
+    server = ApiServer.create(config(), AppConfigLoader.load(temporaryDirectory, coreOverride), chatClient, chatClient);
+    server.start();
+    HttpClient client = HttpClient.newHttpClient();
+    HttpResponse<String> created = client.send(
+      HttpRequest.newBuilder(uri("/web/sessions"))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .POST(HttpRequest.BodyPublishers.ofString("title=Rolling window"))
+        .build(),
+      HttpResponse.BodyHandlers.ofString()
+    );
+    assertEquals(303, created.statusCode());
+    String cookie = created.headers().firstValue("Set-Cookie").orElseThrow().split(";", 2)[0];
+    String protagonists = "fixed_protagonists:\n  Valerie:\n    role: Protagonist";
+
+    assertEquals(303, postSettings(client, cookie,
+      settingsForm("System", protagonists, "Rules", EMPTY_GRAPH)
+        + "&contextSettings=true&contextMode=rolling&contextWindow=8192").statusCode());
+
+    String rendered = getSettings(client, cookie);
+    assertEquals(List.of("Turns (default)", "Rolling window"), contextModeOptions(rendered),
+      "A story is always on turns or on rolling, so those two are the only choices the form offers");
+    assertTrue(contextModeSelect(rendered).contains("<option value=\"rolling\" selected>"),
+      "The mode the session chose has to be the one that reads as selected");
+    assertTrue(rendered.contains("32768"), "The form offers a starting size: " + rendered);
+    String sized = contextWindowTag(rendered);
+    assertTrue(sized.contains("value=\"8192\""), "The stored size is shown: " + sized);
+    assertFalse(sized.contains("disabled"),
+      "Rolling plans against the size, so it has to stay editable: " + sized);
+    assertFalse(sized.contains("required"),
+      "A size that is already there cannot be demanded again: " + sized);
+    assertTrue(sized.contains("min=\"0\""), "An already named size stays free to return to unknown: " + sized);
+
+    HttpResponse<String> rejected = postSettings(client, cookie,
+      settingsForm("System", protagonists, "Rules", EMPTY_GRAPH)
+        + "&contextSettings=true&contextMode=rolling&contextWindow=0");
+    assertEquals(200, rejected.statusCode(), "A rejected save redisplays the form instead of redirecting");
+    assertTrue(rejected.body().contains("id=\"context-error\""), "The error belongs to the context fields");
+    assertTrue(rejected.body().contains("Rolling context needs the model"),
+      "The inline error explains what to do: " + rejected.body());
+    assertTrue(rejected.body().contains("32768"), "The inline error offers a starting size");
+    String typed = contextWindowTag(rejected.body());
+    assertTrue(typed.contains("aria-invalid=\"true\""), "The window input is marked: " + typed);
+    assertTrue(typed.contains("value=\"0\""), "What the user typed is not lost by the rejection: " + typed);
+    assertTrue(typed.contains("required"), "The rejected size has to be completed before saving: " + typed);
+    assertTrue(typed.contains("min=\"1\""), "Zero cannot be a size while rolling needs one: " + typed);
+
+    assertTrue(contextWindowTag(getSettings(client, cookie)).contains("value=\"8192\""),
+      "The rejected save leaves the stored size standing");
+
+    assertEquals(303, postSettings(client, cookie,
+      settingsForm("System", protagonists, "Rules", EMPTY_GRAPH)
+        + "&contextSettings=true&contextMode=turns").statusCode(),
+      "A turns form does not submit a size, because the field does not apply to it");
+    String inTurns = contextWindowTag(getSettings(client, cookie));
+    assertTrue(inTurns.contains("disabled"),
+      "Turns mode ignores the size, so the form grays it out instead of inviting an edit: " + inTurns);
+    assertFalse(inTurns.contains("required"), "Turns mode never demands a size: " + inTurns);
+    assertTrue(inTurns.contains("min=\"0\""), "Turns mode keeps zero a valid unknown: " + inTurns);
+    assertTrue(inTurns.contains("value=\"8192\""),
+      "A save that cannot carry a size keeps the stored one: " + inTurns);
+
+    assertEquals(303, postSettings(client, cookie,
+      settingsForm("System", protagonists, "Rules", EMPTY_GRAPH)
+        + "&contextSettings=true&contextMode=turns&contextWindow=0").statusCode(),
+      "An explicit unknown size stays valid in turns mode");
+  }
+
+  @Test
+  @DisplayName("""
+    Given a server that starts sessions on rolling without a known window,
+    When its settings page renders,
+    Then rolling is selected and the size starts on the recommended one instead of complaining
+    """)
+  void shouldStartSizelessRollingOnARecommendedWindow() throws Exception {
+    Path coreOverride = temporaryDirectory.resolve("sizeless-rolling.config");
+    Files.writeString(coreOverride, "chat.contextMode=rolling\n");
+    ChatClient chatClient = (_, _, _) -> "Unused";
+    server = ApiServer.create(config(), AppConfigLoader.load(temporaryDirectory, coreOverride), chatClient, chatClient);
+    server.start();
+    HttpClient client = HttpClient.newHttpClient();
+    HttpResponse<String> created = client.send(
+      HttpRequest.newBuilder(uri("/web/sessions"))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .POST(HttpRequest.BodyPublishers.ofString("title=Sizeless rolling"))
+        .build(),
+      HttpResponse.BodyHandlers.ofString()
+    );
+    assertEquals(303, created.statusCode());
+    String cookie = created.headers().firstValue("Set-Cookie").orElseThrow().split(";", 2)[0];
+
+    String rendered = getSettings(client, cookie);
+    assertTrue(contextModeSelect(rendered).contains("<option value=\"rolling\" selected>"),
+      "The form shows the mode a new session starts on: " + contextModeSelect(rendered));
+    assertFalse(rendered.contains("id=\"context-error\""),
+      "A form that already supplied a size has nothing to complain about");
+    String field = contextWindowTag(rendered);
+    assertTrue(field.contains("value=\"32768\""), "The form starts rolling on a workable size: " + field);
+    assertTrue(field.contains("required"), "The size still has to survive being edited away: " + field);
+    assertTrue(field.contains("min=\"1\""), "Zero is not a size for rolling: " + field);
+    assertFalse(field.contains("disabled"), "The size belongs to the mode in effect: " + field);
+
+    String protagonists = "fixed_protagonists:\n  Valerie:\n    role: Protagonist";
+    assertEquals(303, postSettings(client, cookie,
+      settingsForm("System", protagonists, "Rules", EMPTY_GRAPH)
+        + "&contextSettings=true&contextMode=rolling&contextWindow=32768").statusCode(),
+      "Saving the form as it stands has to work");
+    assertEquals("rolling", selectedContextMode(getSettings(client, cookie)),
+      "The session now stores its own choice");
+  }
+
+  /** Reads the rendered context window input, so its state can be asserted exactly. */
+  private String contextWindowTag(String body) {
+    var input = java.util.regex.Pattern.compile("<input[^>]*id=\"contextWindow\"[^>]*>").matcher(body);
+    assertTrue(input.find(), "The context window input has to render");
+    return input.group();
+  }
+
+  /** Reads the rendered context mode select, so its options can be asserted exactly. */
+  private String contextModeSelect(String body) {
+    var select = java.util.regex.Pattern
+      .compile("<select[^>]*id=\"contextMode\"[^>]*>[\\s\\S]*?</select>").matcher(body);
+    assertTrue(select.find(), "The context mode select has to render");
+    return select.group();
+  }
+
+  /** The labels of the mode options, in the order the form shows them. */
+  private List<String> contextModeOptions(String body) {
+    var options = java.util.regex.Pattern.compile("<option value=\"[^\"]*\"[^>]*>([^<]*)</option>")
+      .matcher(contextModeSelect(body));
+    List<String> labels = new ArrayList<>();
+    while (options.find()) {
+      labels.add(options.group(1));
+    }
+    return labels;
+  }
+
+  /** The mode the rendered form shows as selected. */
+  private String selectedContextMode(String body) {
+    String select = contextModeSelect(body);
+    return select.contains("<option value=\"rolling\" selected>") ? "rolling" : "turns";
+  }
+
+  /** The settings page as this session sees it. */
+  private String getSettings(HttpClient client, String cookie) throws Exception {
+    return client.send(
+      HttpRequest.newBuilder(uri("/story/settings")).header("Cookie", cookie).GET().build(),
+      HttpResponse.BodyHandlers.ofString()
+    ).body();
+  }
+
+  private HttpResponse<String> postSettings(HttpClient client, String cookie, String form) throws Exception {
+    return client.send(
+      HttpRequest.newBuilder(uri("/story/settings"))
+        .header("Cookie", cookie)
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .POST(HttpRequest.BodyPublishers.ofString(form))
+        .build(),
+      HttpResponse.BodyHandlers.ofString()
+    );
+  }
+
   private void assertTemperature(HttpResponse<String> response, double expected) {
     assertEquals(200, response.statusCode());
     var slider = java.util.regex.Pattern.compile("<input[^>]*id=\"temperature\"[^>]*>")
@@ -983,6 +1166,41 @@ class ApiServerTest {
         .build(),
       HttpResponse.BodyHandlers.ofString()
     );
+  }
+
+  @Test
+  @DisplayName("""
+    Given a server that has no session yet,
+    When its version is requested and its settings page is rendered,
+    Then both name the build that is answering
+    """)
+  void shouldReportTheRunningVersion() throws Exception {
+    server = ApiServer.create(config());
+    server.start();
+    HttpClient client = HttpClient.newHttpClient();
+
+    HttpResponse<String> version = client.send(
+      HttpRequest.newBuilder(uri("/v1/version")).GET().build(),
+      HttpResponse.BodyHandlers.ofString()
+    );
+
+    assertEquals(200, version.statusCode());
+    assertEquals(ApiVersion.read(), JsonSupport.OBJECT_MAPPER.readTree(version.body()).path("version").asText(),
+      "The endpoint reports the build that is running");
+
+    HttpResponse<String> created = client.send(
+      HttpRequest.newBuilder(uri("/web/sessions"))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .POST(HttpRequest.BodyPublishers.ofString("title=Version+stamp"))
+        .build(),
+      HttpResponse.BodyHandlers.ofString()
+    );
+    assertEquals(303, created.statusCode());
+    String cookie = created.headers().firstValue("Set-Cookie").orElseThrow().split(";", 2)[0];
+
+    String rendered = getSettings(client, cookie);
+    assertTrue(rendered.contains("<p class=\"eyebrow\">Storyteller " + ApiVersion.read() + "</p>"),
+      "The settings page names the build serving it, so a stale artefact cannot hide: " + rendered);
   }
 
   private ApiConfig config() {

@@ -313,6 +313,87 @@ class SessionSettingsServiceTest {
 
   @Test
   @DisplayName("""
+    Given a session that names rolling mode itself,
+    When a full save leaves its context window unknown,
+    Then the save is rejected while a known window or turns mode is accepted
+    """)
+  void shouldRequireAWindowForAChosenRollingMode() {
+    StubRepository repository = new StubRepository(storedSettings(null));
+    SessionSettingsService unknownWindow = new SessionSettingsService(repository, new KnowledgeGraphValidator());
+
+    for (Integer window : new Integer[]{0, null}) {
+      InvalidContextSettingException error = assertThrows(InvalidContextSettingException.class,
+        () -> unknownWindow.save(SESSION_ID, "System", VALID_YAML, "Rules", EMPTY_GRAPH, null,
+          null, null, null, null, "rolling", window));
+      assertTrue(error.getMessage().contains("context window"), "The message names what is missing: " + error.getMessage());
+      assertTrue(error.getMessage().contains("32768"), "The message offers a starting size: " + error.getMessage());
+      assertEquals(storedSettings(null), repository.settings, "A rejected save leaves the stored choices intact");
+    }
+
+    assertThrows(InvalidContextSettingException.class,
+      () -> unknownWindow.save(SESSION_ID, "System", VALID_YAML, "Rules", EMPTY_GRAPH, null,
+        null, null, null, null, "Rolling", 0),
+      "A different capitalisation must not bypass the rule");
+
+    unknownWindow.save(SESSION_ID, "System", VALID_YAML, "Rules", EMPTY_GRAPH, null,
+      null, null, null, null, "turns", 0);
+    assertEquals("turns", repository.settings.contextMode(), "Turns mode may keep an unknown window");
+
+    StubRepository knownWindowRepository = new StubRepository(storedSettings(null));
+    SessionSettingsService knownWindow = new SessionSettingsService(knownWindowRepository,
+      new KnowledgeGraphValidator(), false, true, true, "turns", 8192, 512);
+    knownWindow.save(SESSION_ID, "System", VALID_YAML, "Rules", EMPTY_GRAPH, null,
+      null, null, null, null, "rolling", null);
+    assertEquals("rolling", knownWindowRepository.settings.contextMode(),
+      "A session may choose rolling once the server supplies a size");
+    assertNull(knownWindowRepository.settings.contextWindow(), "The window itself stays inherited");
+  }
+
+  @Test
+  @DisplayName("""
+    Given patches around a session that chose rolling mode,
+    When a patch leaves that mode without a size,
+    Then only such a patch is rejected and inheriting the server mode stays allowed
+    """)
+  void shouldRequireAWindowWhenAChosenRollingModeLosesItsSize() {
+    SessionSettings rolling = new SessionSettings(new SessionPrompts("System", VALID_YAML, "Rules"),
+      KnowledgeGraphDocument.empty(), null, null, null, null, null, "rolling", 8192);
+    StubRepository repository = new StubRepository(rolling);
+    SessionSettingsService unknownWindow = new SessionSettingsService(repository, new KnowledgeGraphValidator());
+
+    assertThrows(InvalidContextSettingException.class, () -> unknownWindow.patchConfiguration(SESSION_ID,
+      null, null, null, false, null, false, null, false, null, false, null, false, null,
+      false, null, true, 0));
+    assertFalse(repository.patchContextWindowCalled, "A rejected patch must not reach the repository");
+    assertEquals(rolling, repository.settings, "A rejected patch leaves the stored choices intact");
+
+    assertThrows(InvalidContextSettingException.class, () -> unknownWindow.patchConfiguration(SESSION_ID,
+      null, null, null, false, null, false, null, false, null, false, null, false, null,
+      false, null, true, null),
+      "Returning the window to the server default is rejected while the server has no size either");
+
+    unknownWindow.patchConfiguration(SESSION_ID, null, null, null, false, null, false, null, false, null,
+      false, null, false, null, true, "turns", false, null);
+    assertEquals("turns", repository.patchedContextMode, "A patch that leaves rolling behind needs no size");
+
+    repository.patchContextModeCalled = false;
+    repository.patchedContextMode = null;
+    unknownWindow.patchConfiguration(SESSION_ID, null, null, null, false, null, false, null, false, null,
+      false, null, false, null, true, "rolling", false, null);
+    assertEquals("rolling", repository.patchedContextMode,
+      "Choosing rolling again is allowed as long as the stored window survives");
+
+    StubRepository inheriting = new StubRepository(storedSettings(null));
+    SessionSettingsService serverRolling = new SessionSettingsService(inheriting,
+      new KnowledgeGraphValidator(), false, true, true, "rolling", 0, 0);
+    serverRolling.patchConfiguration(SESSION_ID, null, null, null, false, null, false, null, false, null,
+      false, null, false, null, true, "", false, null);
+    assertNull(inheriting.patchedContextMode,
+      "A session that only inherits the server's sizeless rolling mode stays allowed");
+  }
+
+  @Test
+  @DisplayName("""
     Given a server that defaults to a rolling window,
     When effective context settings are resolved,
     Then sessions inherit it unless they carry their own mode or window

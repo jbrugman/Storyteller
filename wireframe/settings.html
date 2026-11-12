@@ -53,19 +53,28 @@
         <textarea id="rules" name="rules" rows="12" maxlength="1000000"
                   required></textarea>
 
-        <fieldset>
-          <legend>Knowledge graph</legend>
-          <label><input type="checkbox" id="graphEnabled" name="graphEnabled" checked> Use the knowledge graph</label>
-          <p class="setting-hint">When on, facts from the graph below ground story generation and validation, and each turn
-            updates the graph automatically. Manual graph tools below always stay available. When off, the story ignores the
-            graph and stops updating it; stored facts are kept. Defaults to the server's graph.enabled setting and is saved
-            per session in the database.</p>
-        </fieldset>
-
         <label for="knowledgeGraph">Knowledge graph (JSON)</label>
         <textarea id="knowledgeGraph" name="knowledgeGraph" rows="18" maxlength="1000000"
                   aria-invalid="false"
                   required></textarea>
+
+        <fieldset>
+          <legend>Knowledge graph</legend>
+          <label><input type="checkbox" id="graphEnabled" name="graphEnabled" checked> Use the knowledge graph</label>
+          <p class="setting-hint">When on, facts from the graph above ground story generation and validation, and each turn
+            updates the graph automatically. The graph tools below always stay available. When off, the story ignores the
+            graph and stops updating it; stored facts are kept. Defaults to the server's graph.enabled setting and is saved
+            per session in the database.</p>
+          <div class="graph-tools" aria-label="Knowledge graph actions">
+            <span>Graph tools</span>
+            <button disabled title="Unavailable in the demo" class="compact-button" type="submit"
+                    data-graph-action="generate">Generate empty</button>
+            <button disabled title="Unavailable in the demo" class="compact-button" type="submit"
+                    data-graph-action="fill">Fill from protagonists</button>
+            <button disabled title="Unavailable in the demo" class="compact-button danger-button" type="submit"
+                    data-graph-action="reset">Reset turn-based</button>
+          </div>
+        </fieldset>
 
         <fieldset>
           <legend>Response generation</legend>
@@ -104,35 +113,26 @@
           <input type="hidden" name="contextSettings" value="true">
           <label for="contextMode">Recent story sent verbatim</label>
           <select id="contextMode" name="contextMode">
-            <option value="">Server default</option>
-            <option value="turns">Turns</option>
+            <option value="turns" selected>Turns (default)</option>
             <option value="rolling">Rolling window</option>
           </select>
           <p class="setting-hint">
             Turns sends the configured number of recent turns. Rolling fills the model's context window with as many
             recent turns as still fit: the prompts, canonical state, summaries and this turn always go out, and the
-            older story reaches the model through its summaries. Leaving it on Server default follows the server's
-            chat.contextMode, currently turns. Saved per session in the database.
+            older story reaches the model through its summaries. A session that chooses rolling has to name its size
+            below. Saved per session in the database.
           </p>
           <label for="contextWindow">Model context window (tokens)</label>
-          <input type="number" id="contextWindow" name="contextWindow" min="0" max="100000000" step="1" placeholder="0">
+          <input type="number" id="contextWindow" name="contextWindow" min="0" max="100000000" step="1" placeholder="0"
+                 disabled title="Only rolling context plans against a size">
           <p class="setting-hint">
-            Rolling mode needs to know how large the model's window is. Leave the field empty to follow the server
-            default shown as placeholder, or enter 0 when the size is unknown; rolling then sends the recent turns of
-            turns mode and the history page says so. A model that needs room for its reasoning also needs it counted
-            here. Range: 0 to 100000000. Saved per session in the database.
+            Rolling plans the story against this size, so a session on rolling has to name one;
+            32768 is a workable start for a smaller local model, and a model that reserves room for its reasoning
+            counts that room in the size too. Turns mode ignores the size, so the field is only editable for rolling
+            and a stored size is kept for when rolling comes back. An empty field follows the server size shown as
+            placeholder. Range: 0 to 100000000. Saved per session in the database.
           </p>
         </fieldset>
-
-        <div class="graph-tools" aria-label="Knowledge graph actions">
-          <span>Graph tools</span>
-          <button disabled title="Unavailable in the demo" class="compact-button" type="submit"
-                  data-graph-action="generate">Generate empty</button>
-          <button disabled title="Unavailable in the demo" class="compact-button" type="submit"
-                  data-graph-action="fill">Fill from protagonists</button>
-          <button disabled title="Unavailable in the demo" class="compact-button danger-button" type="submit"
-                  data-graph-action="reset">Reset turn-based</button>
-        </div>
 
         <div class="settings-actions">
           <button disabled title="Unavailable in the demo" type="submit">Save settings</button>

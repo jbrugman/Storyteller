@@ -12,6 +12,7 @@ import nl.llm.storyteller.api.http.SessionController;
 import nl.llm.storyteller.api.http.SessionDataController;
 import nl.llm.storyteller.api.http.SessionManagementController;
 import nl.llm.storyteller.api.http.StoryController;
+import nl.llm.storyteller.api.http.VersionController;
 import nl.llm.storyteller.db.Database;
 import nl.llm.storyteller.db.DatabaseEncryption;
 import nl.llm.storyteller.db.JdbcSessionBundleRepository;
@@ -178,6 +179,7 @@ public final class ApiServer implements AutoCloseable {
       defaultMaxTokens
     );
     ApiTlsMaterial tlsMaterial = config.tls().enabled() ? ApiTlsMaterial.prepare(config.tls()) : null;
+    VersionController versionController = new VersionController();
     Javalin server = Javalin.create(javalinConfig -> {
       javalinConfig.startup.showJavalinBanner = false;
       // Keep the bundled same-origin UI working alongside the separately served React build.
@@ -234,6 +236,7 @@ public final class ApiServer implements AutoCloseable {
       sessionDataController.register(javalinConfig);
       sessionManagementController.register(javalinConfig);
       webController.register(javalinConfig);
+      versionController.register(javalinConfig);
       ApiErrorHandler.register(javalinConfig);
     });
     return new ApiServer(config, server, derivedStateService);

@@ -18,5 +18,6 @@ public record SessionConfigResponse(
   String contextMode,
   String effectiveContextMode,
   Integer contextWindow,
-  Integer effectiveContextWindow
+  Integer effectiveContextWindow,
+  String appVersion
 ) { }

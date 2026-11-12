@@ -49,6 +49,8 @@ export interface SessionConfig {
   effectiveContextMode: 'turns' | 'rolling';
   contextWindow: number | null;
   effectiveContextWindow: number;
+  // Which build the server runs; absent from a server that predates the stamp.
+  appVersion?: string;
 }
 
 export class ApiError extends Error {

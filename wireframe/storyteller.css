@@ -70,7 +70,8 @@ textarea {
   line-height: 1.45;
 }
 
-.settings-form textarea[aria-invalid="true"] {
+.settings-form textarea[aria-invalid="true"],
+.settings-form input[aria-invalid="true"] {
   border-color: var(--error-border);
   box-shadow: 0 0 0 3px var(--error-focus-ring);
 }
@@ -233,6 +234,15 @@ select:focus,
 textarea:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+/* The rules above paint every control, so a disabled one needs its own look to be seen as idle. */
+input:disabled,
+select:disabled,
+textarea:disabled {
+  color: var(--muted);
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 button {

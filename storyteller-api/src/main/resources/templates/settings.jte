@@ -2,6 +2,7 @@
 @import nl.llm.storyteller.api.web.StorySettingsPage
 
 @param StorySettingsPage page
+@param String appVersion = "unknown"
 @param StoryContextPage context
 @param boolean streamingEnabled = false
 @param boolean validationEnabled = true
@@ -22,7 +23,7 @@
     <main class="settings-page">
       <header class="story-header">
         <div>
-          <p class="eyebrow">Storyteller</p>
+          <p class="eyebrow">Storyteller ${appVersion}</p>
           <h1>Story settings</h1>
         </div>
         <a class="header-action" href="/story">Back to story</a>
@@ -67,15 +68,6 @@
         <textarea id="rules" name="rules" rows="12" maxlength="1000000"
                   required>${page.prompts().rules()}</textarea>
 
-        <fieldset>
-          <legend>Knowledge graph</legend>
-          <label><input type="checkbox" id="graphEnabled" name="graphEnabled" checked="${graphEnabled}"> Use the knowledge graph</label>
-          <p class="setting-hint">When on, facts from the graph below ground story generation and validation, and each turn
-            updates the graph automatically. Manual graph tools below always stay available. When off, the story ignores the
-            graph and stops updating it; stored facts are kept. Defaults to the server's graph.enabled setting and is saved
-            per session in the database.</p>
-        </fieldset>
-
         <label for="knowledgeGraph">Knowledge graph (JSON)</label>
         @if(page.hasKnowledgeGraphError())
           <p id="knowledge-graph-error" class="settings-error" role="alert">
@@ -86,6 +78,27 @@
                   aria-invalid="${page.hasKnowledgeGraphError()}"
                   aria-describedby="${page.hasKnowledgeGraphError() ? "knowledge-graph-error" : null}"
                   required>${page.knowledgeGraph()}</textarea>
+
+        <fieldset>
+          <legend>Knowledge graph</legend>
+          <label><input type="checkbox" id="graphEnabled" name="graphEnabled" checked="${graphEnabled}"> Use the knowledge graph</label>
+          <p class="setting-hint">When on, facts from the graph above ground story generation and validation, and each turn
+            updates the graph automatically. The graph tools below always stay available. When off, the story ignores the
+            graph and stops updating it; stored facts are kept. Defaults to the server's graph.enabled setting and is saved
+            per session in the database.</p>
+          <div class="graph-tools" aria-label="Knowledge graph actions">
+            <span>Graph tools</span>
+            <button class="compact-button" type="submit"
+                    formaction="/story/settings/graph/generate-empty"
+                    data-graph-action="generate">Generate empty</button>
+            <button class="compact-button" type="submit"
+                    formaction="/story/settings/graph/fill-fixed-protagonists"
+                    data-graph-action="fill">Fill from protagonists</button>
+            <button class="compact-button danger-button" type="submit"
+                    formaction="/story/settings/graph/reset-turn-based"
+                    data-graph-action="reset">Reset turn-based</button>
+          </div>
+        </fieldset>
 
         <fieldset>
           <legend>Response generation</legend>
@@ -134,39 +147,36 @@
           <input type="hidden" name="contextSettings" value="true">
           <label for="contextMode">Recent story sent verbatim</label>
           <select id="contextMode" name="contextMode">
-            <option value="" selected="${context.mode().isEmpty()}">Server default</option>
-            <option value="turns" selected="${context.isMode("turns")}">Turns</option>
+            <option value="turns" selected="${context.isMode("turns")}">Turns (default)</option>
             <option value="rolling" selected="${context.isMode("rolling")}">Rolling window</option>
           </select>
           <p class="setting-hint">
             Turns sends the configured number of recent turns. Rolling fills the model's context window with as many
             recent turns as still fit: the prompts, canonical state, summaries and this turn always go out, and the
-            older story reaches the model through its summaries. Leaving it on Server default follows the server's
-            chat.contextMode, currently ${context.serverMode()}. Saved per session in the database.
+            older story reaches the model through its summaries. A session that chooses rolling has to name its size
+            below. Saved per session in the database.
           </p>
           <label for="contextWindow">Model context window (tokens)</label>
-          <input type="number" id="contextWindow" name="contextWindow" min="0" max="100000000" step="1"
-                 value="${context.window()}" placeholder="${context.serverWindow()}" />
+          @if(page.hasContextError())
+            <p id="context-error" class="settings-error" role="alert">
+              ${page.contextError()}
+            </p>
+          @endif
+          <input type="number" id="contextWindow" name="contextWindow"
+                 min="${context.needsWindow() ? 1 : 0}" max="100000000" step="1"
+                 value="${context.displayedWindow()}" placeholder="${context.serverWindow()}"
+                 disabled="${!context.usesRolling()}"
+                 required="${context.needsWindow()}"
+                 aria-invalid="${page.hasContextError()}"
+                 aria-describedby="${page.hasContextError() ? "context-error" : null}" />
           <p class="setting-hint">
-            Rolling mode needs to know how large the model's window is. Leave the field empty to follow the server
-            default shown as placeholder, or enter 0 when the size is unknown; rolling then sends the recent turns of
-            turns mode and the history page says so. A model that needs room for its reasoning also needs it counted
-            here. Range: 0 to 100000000. Saved per session in the database.
+            Rolling plans the story against this size, so a session on rolling has to name one;
+            ${context.recommendedWindow()} is a workable start for a smaller local model, and a model that reserves room
+            for its reasoning counts that room in the size too. Turns mode ignores the size, so the field is only
+            editable for rolling and a stored size is kept for when rolling comes back. An empty field follows the
+            server size shown as placeholder. Range: 0 to 100000000. Saved per session in the database.
           </p>
         </fieldset>
-
-        <div class="graph-tools" aria-label="Knowledge graph actions">
-          <span>Graph tools</span>
-          <button class="compact-button" type="submit"
-                  formaction="/story/settings/graph/generate-empty"
-                  data-graph-action="generate">Generate empty</button>
-          <button class="compact-button" type="submit"
-                  formaction="/story/settings/graph/fill-fixed-protagonists"
-                  data-graph-action="fill">Fill from protagonists</button>
-          <button class="compact-button danger-button" type="submit"
-                  formaction="/story/settings/graph/reset-turn-based"
-                  data-graph-action="reset">Reset turn-based</button>
-        </div>
 
         <div class="settings-actions">
           <button type="submit">Save settings</button>
@@ -247,6 +257,24 @@
       const validation = document.getElementById("validationEnabled");
       streaming.addEventListener("change", () => { if (streaming.checked) validation.checked = false; });
       validation.addEventListener("change", () => { if (validation.checked) streaming.checked = false; });
+      const contextMode = document.getElementById("contextMode");
+      const contextWindow = document.getElementById("contextWindow");
+      const serverWindow = ${context.serverWindow()};
+      const recommendedWindow = ${context.recommendedWindow()};
+      // Only rolling reads the size, so turns mode grays the field out instead of inviting an edit that does nothing.
+      const applyContextState = () => {
+        const rolling = contextMode.value === "rolling";
+        const named = Number(contextWindow.value.trim() || 0) > 0;
+        contextWindow.disabled = !rolling;
+        contextWindow.required = rolling && !named && serverWindow <= 0;
+        contextWindow.min = rolling && !named && serverWindow <= 0 ? "1" : "0";
+      };
+      contextMode.addEventListener("change", () => {
+        if (contextMode.value === "rolling" && Number(contextWindow.value.trim() || 0) <= 0 && serverWindow <= 0) {
+          contextWindow.value = recommendedWindow;
+        }
+        applyContextState();
+      });
       const temperatureSlider = document.getElementById("temperature");
       const temperatureValue = document.getElementById("temperatureValue");
       if (temperatureSlider) {
