@@ -21,6 +21,13 @@ import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.io.IOException;
+import java.net.ServerSocket;
+import java.security.SecureRandom;
+import java.security.cert.X509Certificate;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -76,6 +83,70 @@ class ApiServerTest {
     if (server != null) {
       server.close();
     }
+  }
+
+  @Test
+  @DisplayName("""
+    Given the API served over TLS,
+    When a same-origin HTTP/2 request carries an Origin header (HTTP/2 sends no Host header),
+    Then it is allowed while a foreign origin is still rejected
+    """)
+  void allowsSameOriginRequestsOverHttp2() throws Exception {
+    int insecurePort = freePort();
+    int securePort = freePort();
+    server = ApiServer.create(new ApiConfig(
+      "127.0.0.1", insecurePort,
+      temporaryDirectory.resolve("database/http2"), "sa", "",
+      Duration.ofMinutes(60),
+      new ApiTlsConfig(true, securePort, temporaryDirectory.resolve("tls-http2"), List.of("localhost"))
+    ));
+    server.start();
+
+    String origin = "https://127.0.0.1:" + securePort;
+    HttpClient client = HttpClient.newBuilder()
+      .version(HttpClient.Version.HTTP_2)
+      .sslContext(trustingAllCertificates())
+      .connectTimeout(Duration.ofSeconds(10))
+      .build();
+
+    HttpResponse<String> sameOrigin = client.send(
+      HttpRequest.newBuilder(URI.create(origin + "/v1/sessions"))
+        .header("Origin", origin).header("Content-Type", "application/json")
+        .POST(HttpRequest.BodyPublishers.ofString("{}")).build(), HttpResponse.BodyHandlers.ofString());
+    assertEquals(HttpClient.Version.HTTP_2, sameOrigin.version(), "the client must negotiate HTTP/2 to exercise this path");
+    assertEquals(201, sameOrigin.statusCode(), sameOrigin.body());
+
+    HttpResponse<String> foreign = client.send(
+      HttpRequest.newBuilder(URI.create(origin + "/v1/sessions"))
+        .header("Origin", "https://evil.example").header("Content-Type", "application/json")
+        .POST(HttpRequest.BodyPublishers.ofString("{}")).build(), HttpResponse.BodyHandlers.ofString());
+    assertEquals(403, foreign.statusCode());
+  }
+
+  private static int freePort() throws IOException {
+    try (ServerSocket socket = new ServerSocket(0)) {
+      return socket.getLocalPort();
+    }
+  }
+
+  private static SSLContext trustingAllCertificates() throws Exception {
+    TrustManager[] trustAll = {new X509TrustManager() {
+      @Override
+      public void checkClientTrusted(X509Certificate[] chain, String authType) {
+      }
+
+      @Override
+      public void checkServerTrusted(X509Certificate[] chain, String authType) {
+      }
+
+      @Override
+      public X509Certificate[] getAcceptedIssuers() {
+        return new X509Certificate[0];
+      }
+    }};
+    SSLContext context = SSLContext.getInstance("TLS");
+    context.init(null, trustAll, new SecureRandom());
+    return context;
   }
 
   @ParameterizedTest

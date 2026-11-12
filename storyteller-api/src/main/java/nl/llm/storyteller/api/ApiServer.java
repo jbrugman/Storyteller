@@ -184,9 +184,9 @@ public final class ApiServer implements AutoCloseable {
       javalinConfig.startup.showJavalinBanner = false;
       // Keep the bundled same-origin UI working alongside the separately served React build.
       javalinConfig.routes.before("/v1/*", context -> {
-        String origin = context.header("Origin");
-        String sameOrigin = context.scheme() + "://" + context.host();
-        if (origin != null && !origin.matches("http://(localhost|127\\.0\\.0\\.1)(:[0-9]{1,5})?") && !origin.equals(sameOrigin)) {
+        var request = context.req();
+        if (!OriginGuard.isAllowed(context.header("Origin"), request.getScheme(), request.getServerName(),
+          request.getServerPort())) {
           throw new io.javalin.http.ForbiddenResponse("Origin is not allowed.");
         }
       });

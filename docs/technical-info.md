@@ -646,6 +646,8 @@ Not yet.
 - The settings pages group the knowledge graph with the graph tools that act on it.
 - Both settings pages and `GET /v1/version` say which build is answering, so an interface can be matched to the
   artefact serving it.
+- Same-origin requests are now recognised over HTTP/2 and on any host or port, so generating, streaming and editing
+  work when the API is reached over the network (for example the LAN server on https) and not only from localhost.
 
 ### 2.1.8
 - Kept the static wireframe aligned with the built-in interface. Its settings page now shows the Response generation (streaming and validation) 
