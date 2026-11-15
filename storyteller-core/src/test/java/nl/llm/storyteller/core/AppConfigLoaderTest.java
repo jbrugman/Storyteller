@@ -283,4 +283,86 @@ class AppConfigLoaderTest {
         assertEquals(8080, config.mlxServerConfig().port());
         assertEquals(180, config.mlxServerConfig().startupTimeoutSeconds());
     }
+
+    @Test
+    @DisplayName("""
+        Given no context mode configuration,
+        When the application config is loaded,
+        Then turns mode with an unknown context window should be the default
+        """)
+    void shouldDefaultToTurnsModeWithAnUnknownContextWindow() throws Exception {
+        Path baseDirectory = Files.createTempDirectory("storyteller-context-defaults");
+
+        nl.llm.storyteller.core.config.AppConfig config =
+            nl.llm.storyteller.core.config.AppConfigLoader.load(baseDirectory, null);
+
+        assertEquals("turns", config.contextMode());
+        assertEquals(0, config.contextWindow());
+        assertEquals(1024, config.responseReserveTokens());
+        assertEquals(0, config.chatMaxTokens());
+    }
+
+    @Test
+    @DisplayName("""
+        Given a rolling context mode override with a context window,
+        When the application config is loaded,
+        Then the rolling context settings should be exposed to callers
+        """)
+    void shouldLoadRollingContextSettingsFromAnOverride() throws Exception {
+        Path baseDirectory = Files.createTempDirectory("storyteller-context-rolling");
+        Path configFile = baseDirectory.resolve("systemprompts/application.config");
+        Files.createDirectories(configFile.getParent());
+        Files.writeString(configFile, """
+            chat.contextMode=rolling
+            chat.contextWindow=8192
+            chat.responseReserveTokens=2048
+            """);
+
+        nl.llm.storyteller.core.config.AppConfig config =
+            nl.llm.storyteller.core.config.AppConfigLoader.load(baseDirectory, null);
+
+        assertEquals("rolling", config.contextMode());
+        assertEquals(8192, config.contextWindow());
+        assertEquals(2048, config.responseReserveTokens());
+    }
+
+    @Test
+    @DisplayName("""
+        Given an unknown context mode,
+        When the application config is loaded,
+        Then the invalid mode should be rejected
+        """)
+    void shouldRejectAnUnknownContextMode() throws Exception {
+        Path baseDirectory = Files.createTempDirectory("storyteller-context-mode");
+        Path configFile = baseDirectory.resolve("systemprompts/application.config");
+        Files.createDirectories(configFile.getParent());
+        Files.writeString(configFile, "chat.contextMode=sliding");
+
+        IllegalArgumentException exception = assertThrows(
+            IllegalArgumentException.class,
+            () -> nl.llm.storyteller.core.config.AppConfigLoader.load(baseDirectory, null)
+        );
+
+        assertTrue(exception.getMessage().contains("chat.contextMode must be turns or rolling"));
+    }
+
+    @Test
+    @DisplayName("""
+        Given a negative context window,
+        When the application config is loaded,
+        Then the invalid window should be rejected
+        """)
+    void shouldRejectANegativeContextWindow() throws Exception {
+        Path baseDirectory = Files.createTempDirectory("storyteller-context-window");
+        Path configFile = baseDirectory.resolve("systemprompts/application.config");
+        Files.createDirectories(configFile.getParent());
+        Files.writeString(configFile, "chat.contextWindow=-1");
+
+        IllegalArgumentException exception = assertThrows(
+            IllegalArgumentException.class,
+            () -> nl.llm.storyteller.core.config.AppConfigLoader.load(baseDirectory, null)
+        );
+
+        assertTrue(exception.getMessage().contains("chat.contextWindow must be 0 for unknown"));
+    }
 }

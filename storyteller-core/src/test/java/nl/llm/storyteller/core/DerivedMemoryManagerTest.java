@@ -18,6 +18,7 @@ import nl.llm.storyteller.core.service.SummaryPromptBuilder;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -31,6 +32,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -229,6 +231,201 @@ class DerivedMemoryManagerTest {
 
     @Test
     @DisplayName("""
+        Given a rolling session whose turns recorded a request frontier,
+        When the recent-summary refresh job is prepared,
+        Then it should condense toward that frontier and stay a bounded recent window
+        """)
+    void shouldCondenseRollingMidTermTowardTheRecordedFrontier() throws Exception {
+        TestContext context = createContext(ROLLING_OVERRIDES);
+        context.historyStore().save(historyThroughTurns(10, 18));
+
+        RecentSummaryManager recentSummaryManager = createRecentSummaryManager(context, new NoOpChatClient());
+        try {
+            Object job = prepareJob(recentSummaryManager);
+
+            assertNotNull(job);
+            assertEquals(18, jobValue(job, "cutoffIndex"),
+                "The mid-term layer chases the boundary a real request left behind, not a turn count");
+            assertEquals(
+                List.of(
+                    new Message("user", "Turn 6"),
+                    new Message("assistant", "Reply 6"),
+                    new Message("user", "Turn 7"),
+                    new Message("assistant", "Reply 7"),
+                    new Message("user", "Turn 8"),
+                    new Message("assistant", "Reply 8"),
+                    new Message("user", "Turn 9"),
+                    new Message("assistant", "Reply 9")
+                ),
+                pendingMessages(job),
+                "Only the newest turns behind the frontier belong to this layer; older story is long-term work"
+            );
+        } finally {
+            recentSummaryManager.shutdown();
+        }
+    }
+
+    @Test
+    @DisplayName("""
+        Given a rolling session whose turns still send the whole story verbatim,
+        When the recent-summary refresh job is prepared,
+        Then no story should leave the raw history before a request actually needed it condensed
+        """)
+    void shouldKeepRollingMidTermIdleUntilATurnRecordsAFrontier() throws Exception {
+        TestContext context = createContext(ROLLING_OVERRIDES);
+        context.historyStore().save(historyThroughTurns(10, 0));
+
+        RecentSummaryManager recentSummaryManager = createRecentSummaryManager(context, new NoOpChatClient());
+        try {
+            assertNull(prepareJob(recentSummaryManager),
+                "Without a recorded frontier every message is still context, so nothing may be summarized away");
+        } finally {
+            recentSummaryManager.shutdown();
+        }
+    }
+
+    @Test
+    @DisplayName("""
+        Given a rolling frontier that moved only one turn past the mid-term cursor,
+        When the recent-summary refresh job is prepared,
+        Then the batch threshold should hold the layer back until more story accumulates
+        """)
+    void shouldHoldRollingMidTermBackBelowTheBatchThreshold() throws Exception {
+        TestContext context = createContext(ROLLING_OVERRIDES);
+        context.historyStore().save(historyThroughTurns(10, 2));
+
+        RecentSummaryManager recentSummaryManager = createRecentSummaryManager(context, new NoOpChatClient());
+        try {
+            assertNull(prepareJob(recentSummaryManager),
+                "Two messages is below recentSummary.batchMessages, so summarizing them would cost more than it saves");
+        } finally {
+            recentSummaryManager.shutdown();
+        }
+    }
+
+    @Test
+    @DisplayName("""
+        Given a rolling session whose mid-term layer consumed eight messages,
+        When the long-term summary refresh job is prepared,
+        Then it should stop where mid-term stopped instead of running ahead into verbatim story
+        """)
+    void shouldChainRollingLongTermBehindTheMidTermLayer() throws Exception {
+        TestContext context = createContext(ROLLING_OVERRIDES);
+        context.historyStore().save(new HistoryState(
+            storyMessages(10),
+            0,
+            8,
+            0,
+            18
+        ));
+
+        SummaryManager summaryManager = createSummaryManager(context, new NoOpChatClient());
+        try {
+            Object job = prepareJob(summaryManager);
+
+            assertNotNull(job);
+            assertEquals(8, jobValue(job, "cutoffIndex"),
+                "Long-term memory condenses what mid-term already consumed, one chain instead of two windows");
+            assertEquals(
+                List.of(
+                    new Message("user", "Turn 1"),
+                    new Message("assistant", "Reply 1"),
+                    new Message("user", "Turn 2"),
+                    new Message("assistant", "Reply 2"),
+                    new Message("user", "Turn 3"),
+                    new Message("assistant", "Reply 3"),
+                    new Message("user", "Turn 4"),
+                    new Message("assistant", "Reply 4")
+                ),
+                pendingMessages(job)
+            );
+        } finally {
+            summaryManager.shutdown();
+        }
+    }
+
+    @Test
+    @DisplayName("""
+        Given a rolling session whose mid-term window is no larger than the verbatim turn count,
+        When a memory refresh is requested the way a completed turn requests it,
+        Then the mid-term layer should still run and condense toward the frontier the request recorded
+        """)
+    void shouldRunTheMidTermLayerFromTheRealEntryPointWhenBothTurnLimitsAreEqual() throws Exception {
+        TestContext context = createContext("""
+            chat.contextMode=rolling
+            chat.contextWindow=8192
+            chat.maxRecentTurns=2
+            recentSummary.maxRecentTurns=2
+            recentSummary.batchMessages=4
+            summary.batchMessages=4
+            """.strip());
+        context.historyStore().save(historyThroughTurns(10, 18));
+
+        RecordingChatClient client = new RecordingChatClient("Mid-term history");
+        RecentSummaryManager recentSummaryManager = createRecentSummaryManager(context, client);
+        try {
+            recentSummaryManager.startUpdateIfNeeded();
+            awaitWorkerIdle(recentSummaryManager);
+
+            assertEquals(List.of("short-memory"), client.purposes(),
+                "a rolling session always has a mid-term layer, so equal turn counts must not silence it");
+            String prompt = String.join("\n",
+                client.requests().getFirst().stream().map(Message::content).toList());
+            assertTrue(prompt.contains("USER: Turn 8") && prompt.contains("ASSISTANT: Reply 8")
+                    && prompt.contains("USER: Turn 9") && prompt.contains("ASSISTANT: Reply 9"),
+                "the newest turns behind the frontier belong to this layer: " + prompt);
+            assertFalse(prompt.contains("Turn 6") || prompt.contains("Turn 7"),
+                "older story is long-term work, not this layer's: " + prompt);
+            assertFalse(prompt.contains("Turn 10"),
+                "the newest turns are still sent verbatim, so summarizing them would drop raw context: " + prompt);
+            assertEquals(18, context.historyStore().load().recentSummaryCursor(),
+                "the layer records how far it condensed, which is the boundary the request left behind");
+            assertEquals("Mid-term history", recentSummaryManager.loadRecentSummary());
+        } finally {
+            recentSummaryManager.shutdown();
+        }
+    }
+
+    @Test
+    @DisplayName("""
+        Given a rolling session without a context window, which therefore still sends turn counts,
+        When the long-term summary refresh job is prepared,
+        Then it should condense behind the mid-term window exactly like turns mode instead of chaining
+            behind the mid-term cursor
+        """)
+    void shouldKeepTheTurnsModeLongTermBoundaryWhenRollingHasNoWindow() throws Exception {
+        String turnCounts = """
+            chat.maxRecentTurns=2
+            recentSummary.maxRecentTurns=4
+            summary.batchMessages=4
+            """.strip() + "\n";
+
+        assertEquals(12, summaryCutoff(turnCounts + "chat.contextMode=rolling\nchat.contextWindow=0\n"),
+            "an unknown window plans no rolling context, so long-term memory keeps the turns-mode rule");
+        assertEquals(12, summaryCutoff(turnCounts + "chat.contextMode=turns\n"),
+            "a rolling session without a window has to agree with turns mode, which measures the same boundary");
+    }
+
+    @Test
+    @DisplayName("""
+        Given an active rolling window whose mid-term layer consumed eight messages while both turn
+            limits are equal,
+        When the long-term summary refresh job is prepared,
+        Then it should stop at the mid-term cursor instead of running ahead into verbatim story
+        """)
+    void shouldChainRollingLongTermBehindTheMidTermLayerWithEqualTurnLimits() throws Exception {
+        assertEquals(8, summaryCutoff("""
+            chat.contextMode=rolling
+            chat.contextWindow=8192
+            chat.maxRecentTurns=2
+            recentSummary.maxRecentTurns=2
+            summary.batchMessages=4
+            """.strip()),
+            "the layers stay one chain even when the mid-term window no longer exceeds the verbatim turns");
+    }
+
+    @Test
+    @DisplayName("""
         Given a running summary refresh whose cursor becomes stale before write-back,
         When the background update completes,
         Then it should not overwrite the summary file or advance the summary cursor
@@ -375,6 +572,54 @@ class DerivedMemoryManagerTest {
         }
     }
 
+    private static final String ROLLING_OVERRIDES = """
+        chat.contextMode=rolling
+        chat.contextWindow=8192
+        chat.maxRecentTurns=2
+        recentSummary.maxRecentTurns=4
+        recentSummary.batchMessages=4
+        summary.batchMessages=4
+        """.strip();
+
+    /** Story of {@code turns} complete turns, with the request frontier the last turn recorded. */
+    private static HistoryState historyThroughTurns(int turns, int contextTargetIndex) {
+        return new HistoryState(storyMessages(turns), 0, 0, 0, contextTargetIndex);
+    }
+
+    private static List<Message> storyMessages(int turns) {
+        List<Message> messages = new java.util.ArrayList<>();
+        for (int turn = 1; turn <= turns; turn++) {
+            messages.add(new Message("user", "Turn " + turn));
+            messages.add(new Message("assistant", "Reply " + turn));
+        }
+        return messages;
+    }
+
+    private int jobValue(Object job, String accessor) {
+        try {
+            Method method = job.getClass().getDeclaredMethod(accessor);
+            method.setAccessible(true);
+            return (int) method.invoke(job);
+        } catch (ReflectiveOperationException ex) {
+            throw new AssertionError(ex);
+        }
+    }
+
+    /** The long-term boundary a summary job would condense up to for these settings and a mid-term cursor of 8. */
+    private int summaryCutoff(String overrides) throws Exception {
+        TestContext context = createContext(overrides);
+        context.historyStore().save(new HistoryState(storyMessages(10), 0, 8, 0, 18));
+
+        SummaryManager summaryManager = createSummaryManager(context, new NoOpChatClient());
+        try {
+            Object job = prepareJob(summaryManager);
+            assertNotNull(job, "eighteen messages sit behind the mid-term window, which is above the batch size");
+            return jobValue(job, "cutoffIndex");
+        } finally {
+            summaryManager.shutdown();
+        }
+    }
+
     private Object prepareJob(Object manager) {
         try {
             Method method = manager.getClass().getDeclaredMethod("prepareJob");
@@ -491,6 +736,38 @@ class DerivedMemoryManagerTest {
 
         CountDownLatch secondFinished() {
             return secondFinished;
+        }
+    }
+
+    /** Records the purpose and prompt of every derived-memory call the background worker makes. */
+    private static final class RecordingChatClient implements ChatClient {
+        private final String response;
+        private final List<String> purposes = new java.util.concurrent.CopyOnWriteArrayList<>();
+        private final List<List<Message>> requests = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+        private RecordingChatClient(String response) {
+            this.response = response;
+        }
+
+        @Override
+        public String chat(List<Message> messages, Map<String, Object> options, int timeoutSeconds) {
+            requests.add(List.copyOf(messages));
+            return response;
+        }
+
+        @Override
+        public String chat(String purpose, List<Message> messages, Map<String, Object> options, int timeoutSeconds)
+          throws IOException, InterruptedException {
+            purposes.add(purpose);
+            return chat(messages, options, timeoutSeconds);
+        }
+
+        List<String> purposes() {
+            return List.copyOf(purposes);
+        }
+
+        List<List<Message>> requests() {
+            return List.copyOf(requests);
         }
     }
 }

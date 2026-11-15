@@ -3,7 +3,7 @@ package nl.llm.storyteller.db;
 final class SessionMemoryQueries {
   static final String SELECT_MEMORY = """
     SELECT summary_content, recent_summary_content, canonical_state_content,
-           summary_cursor, recent_summary_cursor, canonical_state_cursor
+           summary_cursor, recent_summary_cursor, canonical_state_cursor, context_target_index
     FROM session_memory
     WHERE session_id = ?
     """;

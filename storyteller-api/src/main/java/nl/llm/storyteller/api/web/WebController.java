@@ -1,5 +1,6 @@
 package nl.llm.storyteller.api.web;
 
+import nl.llm.storyteller.api.ApiVersion;
 import nl.llm.storyteller.api.input.StoryImageUpload;
 
 import io.javalin.config.JavalinConfig;
@@ -14,6 +15,7 @@ import nl.llm.storyteller.api.story.StoryService;
 import nl.llm.storyteller.db.SessionPrompts;
 import nl.llm.storyteller.db.SessionRecord;
 import nl.llm.storyteller.db.StoryImage;
+import nl.llm.storyteller.api.session.InvalidContextSettingException;
 import nl.llm.storyteller.api.session.InvalidFixedProtagonistsException;
 import nl.llm.storyteller.api.session.InvalidKnowledgeGraphException;
 import nl.llm.storyteller.api.session.SessionCookieService;
@@ -30,6 +32,7 @@ import java.util.Optional;
 public final class WebController {
   private static final int STORY_PAGE_MESSAGES = 10;
   private static final int MAX_TOKENS_LIMIT = 1_000_000;
+  private static final int MAX_CONTEXT_WINDOW_LIMIT = 100_000_000;
   private final SessionService sessionService;
   private final SessionCookieService cookieService;
   private final StoryService storyService;
@@ -162,7 +165,7 @@ public final class WebController {
     cookieService.write(context, session.get().sessionId(), session.get().infinite());
     context.render("story.jte", Map.of(
       "page", storyPage(session.get(), Integer.MAX_VALUE),
-      "streamingEnabled", storyTurnService.streamingEnabled(session.get().sessionId())
+      "contextWarning", storyTurnService.contextWarning(session.get().sessionId())
     ));
   }
 
@@ -207,6 +210,7 @@ public final class WebController {
     cookieService.write(context, session.get().sessionId(), session.get().infinite());
     var settings = settingsService.load(session.get().sessionId());
     context.render("settings.jte", Map.of(
+      "appVersion", ApiVersion.read(),
       "page", StorySettingsPage.valid(
         settings.prompts(),
         settingsService.formatKnowledgeGraph(settings),
@@ -218,7 +222,14 @@ public final class WebController {
       "validationEnabled", settingsService.validationEnabled(settings),
       "graphEnabled", settingsService.graphEnabled(settings),
       "maxTokens", settings.maxTokens() == null ? "" : String.valueOf(settings.maxTokens()),
-      "defaultMaxTokens", defaultMaxTokens
+      "defaultMaxTokens", defaultMaxTokens,
+      "context", new StoryContextPage(
+        settings.contextMode() == null ? "" : settings.contextMode(),
+        settings.contextWindow() == null ? "" : String.valueOf(settings.contextWindow()),
+        settingsService.defaultContextMode(),
+        settingsService.defaultContextWindow(),
+        SessionSettingsService.RECOMMENDED_CONTEXT_WINDOW_TOKENS
+      )
     ));
   }
 
@@ -335,7 +346,12 @@ public final class WebController {
     }
     cookieService.write(context, session.get().sessionId(), session.get().infinite());
     context.render("memory.jte", Map.of(
-      "page", new StoryMemoryPage(memoryService.load(session.get().sessionId()))
+      "page", new StoryMemoryPage(
+        memoryService.load(session.get().sessionId()),
+        storyTurnService.contextReport(session.get().sessionId()),
+        valueOrEmpty(context.queryParam("notificationTitle")),
+        valueOrEmpty(context.queryParam("notificationMessage"))
+      )
     ));
   }
 
@@ -437,7 +453,9 @@ public final class WebController {
       submittedStreaming(context, session.get().sessionId()),
       submittedValidation(context, session.get().sessionId()),
       submittedGraph(context, session.get().sessionId()),
-      parseMaxTokens(context.formParam("maxTokens"))
+      parseMaxTokens(context.formParam("maxTokens")),
+      submittedContextMode(context, session.get().sessionId()),
+      submittedContextWindow(context, session.get().sessionId())
     );
     cookieService.write(context, session.get().sessionId(), session.get().infinite());
     context.redirect("/story", HttpStatus.SEE_OTHER);
@@ -456,6 +474,23 @@ public final class WebController {
   private Boolean submittedGraph(Context context, String sessionId) {
     return context.formParam("generationSettings") != null ? Boolean.valueOf(context.formParam("graphEnabled") != null)
       : settingsService.load(sessionId).graphEnabled();
+  }
+
+  /** An empty selection inherits the server's mode, so the form has to distinguish it from a choice. */
+  private String submittedContextMode(Context context, String sessionId) {
+    return context.formParam("contextSettings") != null ? context.formParam("contextMode")
+      : settingsService.load(sessionId).contextMode();
+  }
+
+  /**
+   * The size a save stores. A field that does not apply is disabled and a disabled field is not submitted, so
+   * an absent parameter keeps the stored size, while an empty parameter returns the session to the server's.
+   */
+  private Integer submittedContextWindow(Context context, String sessionId) {
+    if (context.formParam("contextSettings") == null || context.formParam("contextWindow") == null) {
+      return settingsService.load(sessionId).contextWindow();
+    }
+    return parseContextWindow(context.formParam("contextWindow"));
   }
 
   private Double parseTemperature(String value) {
@@ -492,6 +527,21 @@ public final class WebController {
     }
   }
 
+  private Integer parseContextWindow(String value) {
+    if (value == null || value.isBlank()) {
+      return null;
+    }
+    try {
+      int tokens = Integer.parseInt(value.trim());
+      if (tokens < 0 || tokens > MAX_CONTEXT_WINDOW_LIMIT) {
+        return null;
+      }
+      return tokens;
+    } catch (NumberFormatException _) {
+      return null;
+    }
+  }
+
   private boolean submittedSettingsCouldNotBeSaved(Context context, SessionRecord session) {
     String systemPrompt = context.formParam("systemPrompt");
     String fixedProtagonists = context.formParam("fixedProtagonists");
@@ -500,39 +550,54 @@ public final class WebController {
     String temperatureParam = context.formParam("temperature");
     Double temperature = parseTemperature(temperatureParam);
     Integer maxTokens = parseMaxTokens(context.formParam("maxTokens"));
+    StoryContextPage submittedContext = new StoryContextPage(
+      valueOrEmpty(context.formParam("contextMode")),
+      context.formParam("contextWindow") == null ? "" : context.formParam("contextWindow"),
+      settingsService.defaultContextMode(),
+      settingsService.defaultContextWindow(),
+      SessionSettingsService.RECOMMENDED_CONTEXT_WINDOW_TOKENS
+    );
     SessionPrompts submittedPrompts = new SessionPrompts(
       valueOrEmpty(systemPrompt), valueOrEmpty(fixedProtagonists), valueOrEmpty(rules)
     );
     try {
       settingsService.save(session.sessionId(), systemPrompt, fixedProtagonists, rules, knowledgeGraph, temperature,
         submittedStreaming(context, session.sessionId()), submittedValidation(context, session.sessionId()),
-        submittedGraph(context, session.sessionId()), maxTokens);
+        submittedGraph(context, session.sessionId()), maxTokens,
+        submittedContextMode(context, session.sessionId()),
+        submittedContextWindow(context, session.sessionId()));
     } catch (InvalidFixedProtagonistsException ex) {
-      context.render("settings.jte", Map.of("page", StorySettingsPage.invalidYaml(
-        submittedPrompts,
-        valueOrEmpty(knowledgeGraph),
-        effectiveTemperature(temperature),
-        ex
-      ), "streamingEnabled", Boolean.TRUE.equals(submittedStreaming(context, session.sessionId())),
-        "validationEnabled", Boolean.TRUE.equals(submittedValidation(context, session.sessionId())),
-        "graphEnabled", Boolean.TRUE.equals(submittedGraph(context, session.sessionId())),
-        "maxTokens", maxTokens == null ? "" : String.valueOf(maxTokens),
-        "defaultMaxTokens", defaultMaxTokens));
+      renderSettingsForm(context, StorySettingsPage.invalidYaml(
+        submittedPrompts, valueOrEmpty(knowledgeGraph), effectiveTemperature(temperature), ex
+      ), session.sessionId(), maxTokens, submittedContext);
       return true;
     } catch (InvalidKnowledgeGraphException ex) {
-      context.render("settings.jte", Map.of("page", StorySettingsPage.invalidKnowledgeGraph(
-        submittedPrompts,
-        valueOrEmpty(knowledgeGraph),
-        effectiveTemperature(temperature),
-        ex
-      ), "streamingEnabled", Boolean.TRUE.equals(submittedStreaming(context, session.sessionId())),
-        "validationEnabled", Boolean.TRUE.equals(submittedValidation(context, session.sessionId())),
-        "graphEnabled", Boolean.TRUE.equals(submittedGraph(context, session.sessionId())),
-        "maxTokens", maxTokens == null ? "" : String.valueOf(maxTokens),
-        "defaultMaxTokens", defaultMaxTokens));
+      renderSettingsForm(context, StorySettingsPage.invalidKnowledgeGraph(
+        submittedPrompts, valueOrEmpty(knowledgeGraph), effectiveTemperature(temperature), ex
+      ), session.sessionId(), maxTokens, submittedContext);
+      return true;
+    } catch (InvalidContextSettingException ex) {
+      renderSettingsForm(context, StorySettingsPage.invalidContext(
+        submittedPrompts, valueOrEmpty(knowledgeGraph), effectiveTemperature(temperature), ex
+      ), session.sessionId(), maxTokens, submittedContext);
       return true;
     }
     return false;
+  }
+
+  /** Redisplays the submitted settings form after a rejected save, so nothing the user typed is lost. */
+  private void renderSettingsForm(Context context, StorySettingsPage page, String sessionId,
+    Integer maxTokens, StoryContextPage submittedContext) {
+    context.render("settings.jte", Map.of(
+      "appVersion", ApiVersion.read(),
+      "page", page,
+      "streamingEnabled", Boolean.TRUE.equals(submittedStreaming(context, sessionId)),
+      "validationEnabled", Boolean.TRUE.equals(submittedValidation(context, sessionId)),
+      "graphEnabled", Boolean.TRUE.equals(submittedGraph(context, sessionId)),
+      "maxTokens", maxTokens == null ? "" : String.valueOf(maxTokens),
+      "defaultMaxTokens", defaultMaxTokens,
+      "context", submittedContext
+    ));
   }
 
   private String valueOrEmpty(String value) {

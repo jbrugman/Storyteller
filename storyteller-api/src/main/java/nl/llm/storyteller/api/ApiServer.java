@@ -12,6 +12,7 @@ import nl.llm.storyteller.api.http.SessionController;
 import nl.llm.storyteller.api.http.SessionDataController;
 import nl.llm.storyteller.api.http.SessionManagementController;
 import nl.llm.storyteller.api.http.StoryController;
+import nl.llm.storyteller.api.http.VersionController;
 import nl.llm.storyteller.db.Database;
 import nl.llm.storyteller.db.DatabaseEncryption;
 import nl.llm.storyteller.db.JdbcSessionBundleRepository;
@@ -155,7 +156,8 @@ public final class ApiServer implements AutoCloseable {
       sessionService, cookieService, bundleService
     );
     SessionSettingsService settingsService = new SessionSettingsService(settingsRepository, graphValidator,
-      coreConfig.streamingEnabled(), coreConfig.validationEnabled(), coreConfig.graphEnabled());
+      coreConfig.streamingEnabled(), coreConfig.validationEnabled(), coreConfig.graphEnabled(),
+      coreConfig.contextMode(), coreConfig.contextWindow(), coreConfig.responseReserveTokens());
     var atlasService = new SessionAtlasService(
       settingsService, PredicateCatalog.load(coreConfig.baseDir())
     );
@@ -177,13 +179,14 @@ public final class ApiServer implements AutoCloseable {
       defaultMaxTokens
     );
     ApiTlsMaterial tlsMaterial = config.tls().enabled() ? ApiTlsMaterial.prepare(config.tls()) : null;
+    VersionController versionController = new VersionController();
     Javalin server = Javalin.create(javalinConfig -> {
       javalinConfig.startup.showJavalinBanner = false;
       // Keep the bundled same-origin UI working alongside the separately served React build.
       javalinConfig.routes.before("/v1/*", context -> {
-        String origin = context.header("Origin");
-        String sameOrigin = context.scheme() + "://" + context.host();
-        if (origin != null && !origin.matches("http://(localhost|127\\.0\\.0\\.1)(:[0-9]{1,5})?") && !origin.equals(sameOrigin)) {
+        var request = context.req();
+        if (!OriginGuard.isAllowed(context.header("Origin"), request.getScheme(), request.getServerName(),
+          request.getServerPort())) {
           throw new io.javalin.http.ForbiddenResponse("Origin is not allowed.");
         }
       });
@@ -206,6 +209,21 @@ public final class ApiServer implements AutoCloseable {
       }
       javalinConfig.fileRenderer(new JavalinJte(TemplateEngine.createPrecompiled(ContentType.Html)));
       javalinConfig.staticFiles.add("/public", Location.CLASSPATH);
+      // Same-origin React SPA (bundled onto the classpath as "app" by the CI build); served under
+      // /app so it reaches /v1 and session cookies without any baked-in host, on any machine or
+      // port. Registered only when the SPA is actually present, so JTE-only and offline builds (and
+      // the test/server harnesses) start unchanged; Javalin rejects a missing classpath directory.
+      if (ApiServer.class.getResource("/app/index.html") != null) {
+        javalinConfig.staticFiles.add(react -> {
+          react.directory = "app";
+          react.location = Location.CLASSPATH;
+          react.hostedPath = "/app";
+        });
+        // Serve the SPA shell explicitly: Javalin's static directory handler self-redirects
+        // "/app/", so the shell is returned directly and only hashed assets fall through to static.
+        javalinConfig.routes.get("/app", ApiServer::serveReactApp);
+        javalinConfig.routes.get("/app/", ApiServer::serveReactApp);
+      }
       if (tlsMaterial != null) {
         javalinConfig.routes.get("/storyteller-ca.crt", context -> {
           context.contentType("application/x-x509-ca-cert");
@@ -218,6 +236,7 @@ public final class ApiServer implements AutoCloseable {
       sessionDataController.register(javalinConfig);
       sessionManagementController.register(javalinConfig);
       webController.register(javalinConfig);
+      versionController.register(javalinConfig);
       ApiErrorHandler.register(javalinConfig);
     });
     return new ApiServer(config, server, derivedStateService);
@@ -250,6 +269,16 @@ public final class ApiServer implements AutoCloseable {
     } catch (IOException ex) {
       throw new UncheckedIOException("Could not create the API database directory.", ex);
     }
+  }
+
+  private static void serveReactApp(io.javalin.http.Context context) {
+    var index = ApiServer.class.getResourceAsStream("/app/index.html");
+    if (index == null) {
+      context.status(404);
+      return;
+    }
+    context.contentType("text/html; charset=utf-8");
+    context.result(index);
   }
 
   public void start() {

@@ -10,5 +10,6 @@ public record SessionStateResponse(
   int summaryCursor,
   int recentSummaryCursor,
   int canonicalStateCursor,
-  JsonNode knowledgeGraph
+  JsonNode knowledgeGraph,
+  SessionContextResponse context
 ) { }

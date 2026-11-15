@@ -43,7 +43,8 @@ public final class JdbcStoryHistory implements StoryHistory {
             messages,
             resultSet.getInt("summary_cursor"),
             resultSet.getInt("recent_summary_cursor"),
-            resultSet.getInt("canonical_state_cursor")
+            resultSet.getInt("canonical_state_cursor"),
+            resultSet.getInt("context_target_index")
           );
         }
       }
@@ -60,6 +61,7 @@ public final class JdbcStoryHistory implements StoryHistory {
         deleteMessages(connection);
         insertMessages(connection, state.messages());
         updateCursors(connection, state);
+        saveContextTarget(connection, state);
         connection.commit();
       } catch (SQLException ex) {
         rollback(connection, ex);
@@ -72,7 +74,12 @@ public final class JdbcStoryHistory implements StoryHistory {
 
   @Override
   public synchronized void appendTurn(String userInput, String assistantResponse) {
-    stories.appendTurn(sessionId, userInput, assistantResponse, null, clock.instant());
+    appendTurn(userInput, assistantResponse, 0);
+  }
+
+  @Override
+  public synchronized void appendTurn(String userInput, String assistantResponse, int contextTarget) {
+    stories.appendTurn(sessionId, userInput, assistantResponse, null, clock.instant(), contextTarget);
   }
 
   @Override
@@ -87,10 +94,7 @@ public final class JdbcStoryHistory implements StoryHistory {
       try {
         deleteMessagesFrom(connection, lastUserIndex);
         int remaining = lastUserIndex;
-        updateCursors(connection,
-          Math.min(state.summaryCursor(), remaining),
-          Math.min(state.recentSummaryCursor(), remaining),
-          Math.min(state.canonicalStateCursor(), remaining));
+        clampMemoryCursors(connection, remaining);
         connection.commit();
       } catch (SQLException ex) {
         rollback(connection, ex);
@@ -211,6 +215,36 @@ public final class JdbcStoryHistory implements StoryHistory {
       statement.setInt(2, recentSummary);
       statement.setInt(3, canonicalState);
       statement.setString(4, sessionId);
+      statement.executeUpdate();
+    }
+  }
+
+  /**
+   * Writes the request frontier for a full state replace (the {@code save} back door used outside the
+   * live turn flow). In the live flow the frontier only grows on {@code appendTurn} and only shrinks on
+   * {@code removeLastTurn}; a replace writes the caller's value verbatim.
+   */
+  private void saveContextTarget(Connection connection, HistoryState state) throws SQLException {
+    try (PreparedStatement statement =
+           connection.prepareStatement(ApplicationStorageQueries.UPDATE_CONTEXT_TARGET)) {
+      statement.setInt(1, state.contextTargetIndex());
+      statement.setString(2, sessionId);
+      statement.executeUpdate();
+    }
+  }
+
+  /**
+   * Undo: pull every derived-memory cursor and the request frontier back to the message count that
+   * survives the undo, so a removed turn is no longer treated as summarized and no frontier claims to
+   * have condensed past the story that remains. Mirrors the API undo clamp, in the same transaction.
+   */
+  private void clampMemoryCursors(Connection connection, int remaining) throws SQLException {
+    try (PreparedStatement statement = connection.prepareStatement(StoryQueries.CLAMP_MEMORY_CURSORS)) {
+      statement.setInt(1, remaining);
+      statement.setInt(2, remaining);
+      statement.setInt(3, remaining);
+      statement.setInt(4, remaining);
+      statement.setString(5, sessionId);
       statement.executeUpdate();
     }
   }

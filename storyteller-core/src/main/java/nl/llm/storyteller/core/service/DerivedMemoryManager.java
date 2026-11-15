@@ -42,6 +42,10 @@ abstract class DerivedMemoryManager {
     this.ownsTaskQueue = ownsTaskQueue;
   }
 
+  public final nl.llm.storyteller.core.config.AppConfig config() {
+    return config;
+  }
+
   public final void shutdown() {
     if (ownsTaskQueue) {
       taskQueue.close();

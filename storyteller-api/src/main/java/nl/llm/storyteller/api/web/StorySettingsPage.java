@@ -1,5 +1,6 @@
 package nl.llm.storyteller.api.web;
 
+import nl.llm.storyteller.api.session.InvalidContextSettingException;
 import nl.llm.storyteller.api.session.InvalidFixedProtagonistsException;
 import nl.llm.storyteller.api.session.InvalidKnowledgeGraphException;
 import nl.llm.storyteller.db.SessionPrompts;
@@ -12,6 +13,7 @@ public record StorySettingsPage(
   int yamlErrorLine,
   int yamlErrorColumn,
   String knowledgeGraphError,
+  String contextError,
   String notificationTitle,
   String notificationMessage
 ) {
@@ -23,7 +25,7 @@ public record StorySettingsPage(
     String notificationMessage
   ) {
     return new StorySettingsPage(
-      prompts, knowledgeGraph, temperature, "", 0, 0, "", notificationTitle, notificationMessage
+      prompts, knowledgeGraph, temperature, "", 0, 0, "", "", notificationTitle, notificationMessage
     );
   }
 
@@ -33,7 +35,8 @@ public record StorySettingsPage(
     Double temperature,
     InvalidFixedProtagonistsException error
   ) {
-    return new StorySettingsPage(prompts, knowledgeGraph, temperature, error.getMessage(), error.line(), error.column(), "", "", "");
+    return new StorySettingsPage(prompts, knowledgeGraph, temperature, error.getMessage(), error.line(),
+      error.column(), "", "", "", "");
   }
 
   static StorySettingsPage invalidKnowledgeGraph(
@@ -42,7 +45,16 @@ public record StorySettingsPage(
     Double temperature,
     InvalidKnowledgeGraphException error
   ) {
-    return new StorySettingsPage(prompts, knowledgeGraph, temperature, "", 0, 0, error.getMessage(), "", "");
+    return new StorySettingsPage(prompts, knowledgeGraph, temperature, "", 0, 0, error.getMessage(), "", "", "");
+  }
+
+  static StorySettingsPage invalidContext(
+    SessionPrompts prompts,
+    String knowledgeGraph,
+    Double temperature,
+    InvalidContextSettingException error
+  ) {
+    return new StorySettingsPage(prompts, knowledgeGraph, temperature, "", 0, 0, "", error.getMessage(), "", "");
   }
 
   public boolean hasYamlError() {
@@ -51,6 +63,10 @@ public record StorySettingsPage(
 
   public boolean hasKnowledgeGraphError() {
     return !knowledgeGraphError.isEmpty();
+  }
+
+  public boolean hasContextError() {
+    return !contextError.isEmpty();
   }
 
   public boolean hasNotification() {

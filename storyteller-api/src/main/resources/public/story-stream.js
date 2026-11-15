@@ -1,5 +1,25 @@
 /* Streamed content is always inserted as plain text. */
 window.StoryStreaming = {
+  /*
+   * Streaming is a session setting that the settings page can change without the story page reloading,
+   * so the composer asks for it at submit time rather than trusting how this page was rendered. Only a
+   * clear yes from the server streams: missing URLs, a rejected request, an unsuccessful answer or a
+   * session that simply has streaming off all mean the composer posts its plain form, which the server
+   * always accepts. A missing answer costs streaming, never a story turn.
+   */
+  async streamEnabled(composer) {
+    const configUrl = composer.dataset.configUrl;
+    if (!composer.dataset.streamUrl || !configUrl) return false;
+    try {
+      const result = await fetch(configUrl, { credentials: "same-origin" });
+      if (!result.ok) return false;
+      const config = await result.json();
+      return config.effectiveStreamingEnabled === true;
+    } catch {
+      return false;
+    }
+  },
+
   async generate(url, body, conversation) {
     conversation.querySelector("[data-stream-preview]")?.remove();
     const empty = conversation.querySelector(".empty-state");
@@ -24,7 +44,11 @@ window.StoryStreaming = {
     let reader;
     try {
       const result = await fetch(url, { method: "POST", body, credentials: "same-origin" });
-      if (!result.ok || !result.body) throw new Error("Generation could not start.");
+      if (!result.ok) {
+        const detail = await result.json().catch(() => null);
+        throw new Error(detail?.message || `Generation failed (HTTP ${result.status}).`);
+      }
+      if (!result.body) throw new Error("Generation could not start.");
       reader = result.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";

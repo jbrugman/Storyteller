@@ -80,4 +80,44 @@ class JdbcApplicationStorageTest {
     ), history.load().messages());
     assertEquals(2, history.load().summaryCursor());
   }
+
+  @Test
+  @DisplayName("""
+    Given CLI turns that record the frontier their request actually left behind,
+    When later turns, memory bookkeeping, and two undos touch the same session,
+    Then JDBC history should grow the frontier on a turn and clamp it back on an undo
+    """)
+  void shouldKeepTheRequestFrontierWithinHistorySemantics() {
+    JdbcStoryHistory history = new JdbcStoryHistory(database, SESSION_ID);
+
+    history.appendTurn("First prompt", "First response", 0);
+    assertEquals(0, history.load().contextTargetIndex(),
+      "A turn without a frontier leaves it where it was");
+
+    history.appendTurn("Second prompt", "Second response", 2);
+    assertEquals(2, history.load().contextTargetIndex(), "A turn raises the frontier to its own boundary");
+
+    history.appendTurn("Third prompt", "Third response", 4);
+    assertEquals(4, history.load().contextTargetIndex());
+
+    history.markSummarized(2);
+    history.markRecentSummarized(2);
+    assertEquals(4, history.load().contextTargetIndex(),
+      "Derived-memory bookkeeping never rewrites the frontier");
+
+    assertEquals("Third prompt", history.removeLastTurn());
+    assertEquals(4, history.load().contextTargetIndex(),
+      "The frontier never passed the story that survives the first undo, so it stays");
+
+    assertEquals("Second prompt", history.removeLastTurn());
+    assertEquals(2, history.load().contextTargetIndex(),
+      "The second undo pulls the frontier back to the story that remains, so it cannot claim a removed turn");
+
+    history.save(new HistoryState(List.of(
+      new Message("user", "Imported prompt"),
+      new Message("assistant", "Imported response")
+    ), 0, 0, 0, 1));
+    assertEquals(1, history.load().contextTargetIndex(),
+      "Only the full state replace writes a frontier verbatim, because it replaces the whole state");
+  }
 }

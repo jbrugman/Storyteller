@@ -59,7 +59,7 @@ jobs:
       - name: Determine next release version
         id: version
         run: |
-          release_minor="2.1"
+          release_minor="2.2"
           last_tag="$(git tag -l "v${release_minor}.*" --sort=-version:refname | head -n 1)"
           if [ -z "$last_tag" ]; then
             next_patch=0

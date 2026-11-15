@@ -168,6 +168,7 @@ The public API exposes the same operations as the bundled web interface. Respons
 
 | Method | Path | Purpose |
 |---|---|---|
+| `GET` | `/v1/version` | Report which build is answering; no session needed. |
 | `POST` | `/v1/sessions` | Create a database-backed story session. |
 | `GET` | `/v1/session` | Resolve the active browser session. |
 | `POST` | `/v1/session/stop` | Stop the active session and clear its cookie; preserve infinite sessions. |
@@ -175,7 +176,7 @@ The public API exposes the same operations as the bundled web interface. Respons
 | `POST` | `/v1/sessions/{sessionId}/turns` | Submit a story turn and return the generated reply. |
 | `POST` | `/v1/sessions/{sessionId}/messages/{messageIndex}/edit` | Edit an existing assistant response. |
 | `GET` | `/v1/sessions/{sessionId}/history` | Read the complete ordered message history. |
-| `GET` | `/v1/sessions/{sessionId}/config` | Read editable prompts, the session temperature and the response token limit. |
+| `GET` | `/v1/sessions/{sessionId}/config` | Read editable prompts, the session temperature, the response token limit and the context settings. |
 | `PATCH` | `/v1/sessions/{sessionId}/config` | Update only the supplied configuration fields. |
 | `POST` | `/v1/sessions/{sessionId}/undo` | Undo the latest persisted exchange. |
 | `GET` | `/v1/sessions/{sessionId}/atlas` | Read named graph entries and readable, directed facts with statuses and sources. |
@@ -223,14 +224,16 @@ response does not embed the image. Retrieve its bytes through `GET /v1/sessions/
 
 `GET /v1/sessions/{sessionId}/config` returns `200` with `sessionId`, `systemPrompt`, `fixedProtagonists`, `rules`,
 `temperature`, `effectiveTemperature`, `streamingEnabled`, `validationEnabled`, `graphEnabled`,
-`effectiveStreamingEnabled`, `effectiveValidationEnabled`, `effectiveGraphEnabled`, `maxTokens`, and
-`effectiveMaxTokens`. Prompt fields contain their stored text; `fixedProtagonists` contains YAML. A null override
-follows the application default, which the matching effective field reports: `chat.temperature` for temperature and
-`chat.maxTokens` for the maximum tokens a single response may use.
+`effectiveStreamingEnabled`, `effectiveValidationEnabled`, `effectiveGraphEnabled`, `maxTokens`,
+`effectiveMaxTokens`, `contextMode`, `effectiveContextMode`, `contextWindow`, `effectiveContextWindow`, and `appVersion`, the version the server was built from. Prompt
+fields contain their stored text; `fixedProtagonists` contains YAML. A null override follows the application default,
+which the matching effective field reports: `chat.temperature` for temperature, `chat.maxTokens` for the maximum tokens
+a single response may use, `chat.contextMode` for how a request is assembled, and `chat.contextWindow` for the model's
+context window in tokens.
 
 `PATCH /v1/sessions/{sessionId}/config` accepts a JSON object containing any subset of `systemPrompt`,
-`fixedProtagonists`, `rules`, `temperature`, `streamingEnabled`, `validationEnabled`, `graphEnabled`, and `maxTokens`,
-for example:
+`fixedProtagonists`, `rules`, `temperature`, `streamingEnabled`, `validationEnabled`, `graphEnabled`, `maxTokens`,
+`contextMode`, and `contextWindow`, for example:
 
 ```json
 {"temperature": 0.8, "maxTokens": 512, "rules": "Keep the story consistent."}
@@ -242,8 +245,17 @@ Temperature must be a JSON number between `0` and `2`, inclusive, or null. Setti
 application default. Database storage rounds temperature to three decimal places; the response contains the stored
 value. `maxTokens` must be a whole JSON number or null: above `0` it limits a response, `0` removes any limit for that
 session even when the application configures one, and null restores the `chat.maxTokens` default; below `0` or above
-`1000000` it is rejected. Unknown fields and malformed JSON are rejected with `400` and the existing `invalid_request`
-error shape.
+`1000000` it is rejected. `contextMode` must be `"turns"`, `"rolling"`, or null, and null inherits
+`chat.contextMode`. `contextWindow` must be a whole JSON number or null: above `0` it is the model's context window in
+tokens, `0` declares the size unknown, which makes rolling mode send the recent turns of turns mode while the context
+report explains why, and null inherits `chat.contextWindow`; below `0` or above `100000000` it is rejected. Mode and
+window are validated and updated on their own, so a patch carrying only one of them never rewrites or rejects the
+other. The one rule spanning them judges the values in effect rather than the fields sent: a patch that puts the session
+itself in `rolling` has to leave it with a window above `0`, whether that size comes from the patch or from what the
+session already stored, and otherwise is rejected with `400` and the `invalid_request` shape without changing anything.
+A session inheriting rolling from `chat.contextMode` stays outside that rule, because an unknown server window is its
+operator's choice and keeps explaining itself through the context report. Unknown fields and malformed JSON are rejected
+with `400` and the existing `invalid_request` error shape.
 
 All supplied fields are validated before persistence and updated in one repository transaction. The patch does not
 rewrite omitted prompts, the knowledge graph, or memory. It returns `200` with the same shape as `GET /config`.
@@ -264,6 +276,14 @@ invoke the model or introduce a cache-buster reset or retry operation.
 `summaryCursor`, `recentSummaryCursor`, `canonicalStateCursor`, and `knowledgeGraph`. Memory fields contain stored
 text; cursors are the processed message counts used by the existing memory implementation. `knowledgeGraph` is a JSON
 object in the existing graph codec format (`schemaVersion`, `revision`, `entities`, `facts`).
+
+The response also carries `context`, the context a next turn would assemble: `mode`, `contextWindow`,
+`requiredTokens` for the always-sent frame plus the space kept free for a reply, `historyTokens` for what the window
+then leaves for raw turns, `verbatimMessages` and `totalMessages`, `summarizedMessages` for the story messages reaching
+the model only through derived memory, and `warning`, empty unless the configured window needs the user to act. A
+rolling session whose window is unknown keeps reporting `rolling` and warns that it sends the recent turns of turns
+mode instead, and turns mode reports `historyTokens` as `0` because its raw turns follow `chat.maxRecentTurns`. Like
+memory, this is measured while the request is read and says nothing about a turn already in flight.
 
 This is read-only inspection. Derived updates run asynchronously after a turn, so memory and graph can lag behind
 history and are read independently; this response is not an atomic snapshot or a guarantee that background work has

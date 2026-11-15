@@ -17,6 +17,7 @@ public final class PromptAssemblyService {
   private final StoryChatPromptBuilder storyChatPromptBuilder;
   private final ValidationPromptBuilder validationPromptBuilder;
   private final KnowledgeGraphService knowledgeGraphService;
+  private final RollingContextWindow rollingContextWindow;
 
   public PromptAssemblyService(
     StoryHistory historyStore,
@@ -49,11 +50,65 @@ public final class PromptAssemblyService {
     this.storyChatPromptBuilder = storyChatPromptBuilder;
     this.validationPromptBuilder = validationPromptBuilder;
     this.knowledgeGraphService = knowledgeGraphService;
+    this.rollingContextWindow = new RollingContextWindow(summaryManager.config());
   }
 
   public List<Message> buildChatMessages(String userInput) {
+    return buildChatRequest(userInput).messages();
+  }
+
+  /** A CLI chat request: the messages to send plus the request frontier the turn should record. */
+  public record AssembledRequest(List<Message> messages, int contextTarget) {
+  }
+
+  public AssembledRequest buildChatRequest(String userInput) {
+    return buildChatRequest(userInput, null);
+  }
+
+  /**
+   * Assembles the chat request for a turn and the durable request frontier to record with it. Both the
+   * frame measurement and the request go through {@link #withAttachedImage}, so a picture is charged
+   * against the context budget before history is trimmed and is still attached when the request leaves.
+   *
+   * <p>Rolling mode records the frontier; turns mode records nothing. A rolling frontier is the absolute
+   * index of the first message sent verbatim, because everything before it leaves this request and derived
+   * memory must still condense up to it. {@code historyStore.load()} holds the whole story here, so an
+   * index into it is already absolute; {@code total - verbatim} is that index.
+   */
+  public AssembledRequest buildChatRequest(String userInput, String imageDataUrl) {
     TurnRuleDecision turnRuleDecision = turnManager.evaluate(userInput);
-    return buildStoryChatMessages(userInput, historyStore.recentMessages(summaryManager.config.maxRecentTurns()), turnRuleDecision.promptInstruction());
+    List<Message> verbatim;
+    int contextTarget;
+    if (rollingContextWindow.enabled()) {
+      List<Message> history = historyStore.load().messages();
+      int frameTokens = RollingContextWindow.estimateMessages(
+        withAttachedImage(
+          buildStoryChatMessages(userInput, List.of(), turnRuleDecision.promptInstruction()), imageDataUrl));
+      verbatim = rollingContextWindow.verbatimMessages(history, rollingContextWindow.plan(history, frameTokens));
+      contextTarget = Math.clamp(history.size() - verbatim.size(), 0, history.size());
+    } else {
+      verbatim = historyStore.recentMessages(summaryManager.config().maxRecentTurns());
+      // Turns mode keeps its own memory layout and leaves the durable frontier untouched, like the API.
+      contextTarget = 0;
+    }
+    List<Message> messages = withAttachedImage(
+      buildStoryChatMessages(userInput, verbatim, turnRuleDecision.promptInstruction()), imageDataUrl);
+    return new AssembledRequest(messages, contextTarget);
+  }
+
+  /**
+   * Attaches an attached picture to the user message, so the cost estimate and the request agree. Without
+   * an image it returns the messages untouched.
+   */
+  private static List<Message> withAttachedImage(List<Message> messages, String imageDataUrl) {
+    if (imageDataUrl == null || imageDataUrl.isBlank()) {
+      return messages;
+    }
+    List<Message> withImage = new java.util.ArrayList<>(messages);
+    Message userMessage = withImage.getLast();
+    withImage.set(withImage.size() - 1,
+      Message.withImage(userMessage.role(), userMessage.content(), imageDataUrl));
+    return withImage;
   }
 
   public List<Message> buildResetMessages(String userInput) {

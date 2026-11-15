@@ -31,11 +31,12 @@ public final class StoryStream {
         try { send(context, "text", Map.of("text", text)); }
         catch (IOException ex) { throw new UncheckedIOException(ex); }
       });
-      send(context, "done", Map.of(
-        "userMessageIndex", result.userMessageIndex(),
-        "assistantMessageIndex", result.assistantMessageIndex(),
-        "response", result.response()
-      ));
+      var done = new java.util.LinkedHashMap<String, Object>();
+      done.put("userMessageIndex", result.userMessageIndex());
+      done.put("assistantMessageIndex", result.assistantMessageIndex());
+      done.put("response", result.response());
+      done.put("contextWarning", result.contextWarning());
+      send(context, "done", done);
     } catch (InterruptedException ex) {
       send(context, "error", Map.of("message", "Generation was interrupted. The response is incomplete."));
       Thread.currentThread().interrupt();

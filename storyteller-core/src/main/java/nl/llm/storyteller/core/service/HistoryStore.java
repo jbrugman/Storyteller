@@ -48,7 +48,8 @@ public final class HistoryStore implements StoryHistory {
       int summaryCursor = data.path("summary_cursor").asInt(0);
       int recentSummaryCursor = data.path("recent_summary_cursor").asInt(0);
       int canonicalStateCursor = data.path("canonical_state_cursor").asInt(0);
-      return new HistoryState(messages, summaryCursor, recentSummaryCursor, canonicalStateCursor);
+      int contextTargetIndex = data.path("context_target_index").asInt(0);
+      return new HistoryState(messages, summaryCursor, recentSummaryCursor, canonicalStateCursor, contextTargetIndex);
     } catch (JsonProcessingException ex) {
       throw new IllegalArgumentException("Invalid JSON in " + path + ": " + ex.getOriginalMessage(), ex);
     } catch (IOException ex) {
@@ -65,6 +66,7 @@ public final class HistoryStore implements StoryHistory {
     data.put("summary_cursor", state.summaryCursor());
     data.put("recent_summary_cursor", state.recentSummaryCursor());
     data.put("canonical_state_cursor", state.canonicalStateCursor());
+    data.put("context_target_index", state.contextTargetIndex());
 
     try {
       AtomicFileWriter.write(path, JsonSupport.OBJECT_MAPPER.writeValueAsBytes(data));
@@ -74,11 +76,18 @@ public final class HistoryStore implements StoryHistory {
   }
 
   public synchronized void appendTurn(String userInput, String assistantResponse) {
+    appendTurn(userInput, assistantResponse, 0);
+  }
+
+  public synchronized void appendTurn(String userInput, String assistantResponse, int contextTarget) {
     HistoryState state = load();
     List<Message> messages = new ArrayList<>(state.messages());
     messages.add(new Message("user", userInput));
     messages.add(new Message("assistant", assistantResponse));
-    save(new HistoryState(messages, state.summaryCursor(), state.recentSummaryCursor(), state.canonicalStateCursor()));
+    // The frontier only grows on a turn and only shrinks on an undo; a non-positive target keeps it.
+    int frontier = Math.max(state.contextTargetIndex(), contextTarget);
+    save(new HistoryState(messages, state.summaryCursor(), state.recentSummaryCursor(),
+      state.canonicalStateCursor(), frontier));
   }
 
   public synchronized String removeLastTurn() {
@@ -103,7 +112,8 @@ public final class HistoryStore implements StoryHistory {
       messages,
       Math.min(state.summaryCursor(), newSize),
       Math.min(state.recentSummaryCursor(), newSize),
-      Math.min(state.canonicalStateCursor(), newSize)
+      Math.min(state.canonicalStateCursor(), newSize),
+      Math.min(state.contextTargetIndex(), newSize)
     ));
     return restoredUserInput;
   }
@@ -157,19 +167,22 @@ public final class HistoryStore implements StoryHistory {
   public synchronized void markSummarized(int messagesCount) {
     HistoryState state = load();
     int safeCount = Math.min(messagesCount, state.messages().size());
-    save(new HistoryState(new ArrayList<>(state.messages()), safeCount, state.recentSummaryCursor(), state.canonicalStateCursor()));
+    save(new HistoryState(new ArrayList<>(state.messages()), safeCount, state.recentSummaryCursor(),
+      state.canonicalStateCursor(), state.contextTargetIndex()));
   }
 
   public synchronized void markRecentSummarized(int messagesCount) {
     HistoryState state = load();
     int safeCount = Math.min(messagesCount, state.messages().size());
-    save(new HistoryState(new ArrayList<>(state.messages()), state.summaryCursor(), safeCount, state.canonicalStateCursor()));
+    save(new HistoryState(new ArrayList<>(state.messages()), state.summaryCursor(), safeCount,
+      state.canonicalStateCursor(), state.contextTargetIndex()));
   }
 
   public synchronized void markCanonicalStateUpdated(int messagesCount) {
     HistoryState state = load();
     int safeCount = Math.min(messagesCount, state.messages().size());
-    save(new HistoryState(new ArrayList<>(state.messages()), state.summaryCursor(), state.recentSummaryCursor(), safeCount));
+    save(new HistoryState(new ArrayList<>(state.messages()), state.summaryCursor(), state.recentSummaryCursor(),
+      safeCount, state.contextTargetIndex()));
   }
 
   private List<Message> sliceRecentCompleteTurns(List<Message> messages, int limitTurns) {

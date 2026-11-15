@@ -69,7 +69,8 @@ textarea {
   line-height: 1.45;
 }
 
-.settings-form textarea[aria-invalid="true"] {
+.settings-form textarea[aria-invalid="true"],
+.settings-form input[aria-invalid="true"] {
   border-color: var(--error-border);
   box-shadow: 0 0 0 3px var(--error-focus-ring);
 }
@@ -232,6 +233,15 @@ select:focus,
 textarea:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+/* The rules above paint every control, so a disabled one needs its own look to be seen as idle. */
+input:disabled,
+select:disabled,
+textarea:disabled {
+  color: var(--muted);
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 button {
@@ -796,7 +806,8 @@ textarea {
 
 /* Temperature slider */
 .temperature-fieldset,
-.max-tokens-fieldset {
+.max-tokens-fieldset,
+.context-fieldset {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 1rem 1.25rem;
@@ -804,7 +815,9 @@ textarea {
 }
 
 .temperature-fieldset > label,
-.max-tokens-fieldset > label {
+.max-tokens-fieldset > label,
+.context-fieldset > label,
+.context-fieldset legend {
   display: block;
   font-weight: 600;
   margin-bottom: 0.3rem;
@@ -812,6 +825,11 @@ textarea {
 
 .max-tokens-fieldset input[type="number"] {
   max-width: 12rem;
+}
+
+.context-fieldset input[type="number"],
+.context-fieldset select {
+  max-width: 16rem;
 }
 
 .setting-hint {

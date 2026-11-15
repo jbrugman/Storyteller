@@ -26,6 +26,17 @@
           These read-only summaries are generated from older story turns and supplied to subsequent model requests.
         </p>
 
+        <h2>Next request</h2>
+        <p class="setting-hint" id="context-report">
+          Context mode ${page.context().mode()} · window ${page.context().windowTokens()} tokens · prompts, memory and
+          reserved reply space ${page.context().requiredTokens()} tokens · verbatim turns ${page.context().verbatimMessages()}
+          of ${page.context().totalMessages()} · supplied through memory instead ${page.summarizedMessages()}.
+        </p>
+        @if(page.hasWarning())
+          <p class="settings-error" role="alert">${page.context().warning()}</p>
+        @endif
+
+        <h2>Memory layers</h2>
         <label for="recentSummary">Mid-term history · processed messages: ${page.memory().recentSummaryCursor()}</label>
         <textarea id="recentSummary" rows="12" readonly
                   placeholder="No mid-term history has been generated yet.">${page.memory().recentSummary()}</textarea>
@@ -52,5 +63,30 @@
         </form>
       </section>
     </main>
+    @if(page.hasNotification())
+      <div id="memory-notification" class="notification-modal" role="alertdialog" aria-modal="true"
+           aria-labelledby="memory-notification-title"
+           aria-describedby="memory-notification-message">
+        <div class="notification-modal-content">
+          <p id="memory-notification-title" class="notification-modal-title">${page.notificationTitle()}</p>
+          <p id="memory-notification-message">${page.notificationMessage()}</p>
+          <button id="memory-notification-close" type="button">Close</button>
+        </div>
+      </div>
+    @endif
+    <script>
+      const memoryNotification = document.getElementById("memory-notification");
+      const memoryNotificationClose = document.getElementById("memory-notification-close");
+      const closeMemoryNotification = () => {
+        if (memoryNotification) {
+          memoryNotification.hidden = true;
+          window.history.replaceState({}, "", "/story/memory");
+        }
+      };
+      memoryNotificationClose?.addEventListener("click", closeMemoryNotification);
+      if (memoryNotification) {
+        window.setTimeout(closeMemoryNotification, 8000);
+      }
+    </script>
   </body>
 </html>

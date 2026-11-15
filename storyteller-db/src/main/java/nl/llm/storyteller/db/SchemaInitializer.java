@@ -43,6 +43,9 @@ public final class SchemaInitializer {
         addColumnIfMissing(connection, "SESSION_CONFIGURATION", "STREAMING_ENABLED", "streaming_enabled BOOLEAN");
         addColumnIfMissing(connection, "SESSION_CONFIGURATION", "GRAPH_ENABLED", "graph_enabled BOOLEAN");
         addColumnIfMissing(connection, "SESSION_CONFIGURATION", "MAX_TOKENS", "max_tokens INTEGER");
+        addColumnIfMissing(connection, "SESSION_CONFIGURATION", "CONTEXT_MODE", "context_mode VARCHAR(16)");
+        addColumnIfMissing(connection, "SESSION_CONFIGURATION", "CONTEXT_WINDOW", "context_window INTEGER");
+        addColumnIfMissing(connection, "SESSION_MEMORY", "CONTEXT_TARGET_INDEX", "context_target_index INTEGER NOT NULL DEFAULT 0");
         addStoryImageColumnsIfMissing(connection);
         DatabaseEncryptionMigration.initialize(database, connection, existingTables);
         return;

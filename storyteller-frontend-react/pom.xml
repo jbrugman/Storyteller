@@ -18,9 +18,10 @@
        Java modules. The npm build needs the npm registry and a Node download, so its executions
        are gated to CI (env CI=true). Local and offline builds keep this module as an inert
        pom project, leaving `mvn clean verify` unchanged there.
-       Every execution binds to verify, in declaration order, so that lifecycle runs stopping
-       before verify skip npm entirely. The release workflow packages with `mvn clean package`
-       and would otherwise download Node and run `npm ci` without executing a single check. -->
+       install-node, npm ci and npm build bind to package (declaration order) so that both
+       `mvn clean verify` and the release `mvn clean package` produce dist, letting the api
+       module embed the SPA in the packaged jar; npm test stays on verify so packaging does not
+       re-run the suite. -->
   <profiles>
     <profile>
       <id>react-frontend</id>
@@ -45,14 +46,14 @@
                 <goals>
                   <goal>install-node-and-npm</goal>
                 </goals>
-                <phase>verify</phase>
+                <phase>package</phase>
               </execution>
               <execution>
                 <id>npm-ci</id>
                 <goals>
                   <goal>npm</goal>
                 </goals>
-                <phase>verify</phase>
+                <phase>package</phase>
                 <configuration>
                   <arguments>ci</arguments>
                 </configuration>
@@ -62,7 +63,7 @@
                 <goals>
                   <goal>npm</goal>
                 </goals>
-                <phase>verify</phase>
+                <phase>package</phase>
                 <configuration>
                   <arguments>run build</arguments>
                 </configuration>

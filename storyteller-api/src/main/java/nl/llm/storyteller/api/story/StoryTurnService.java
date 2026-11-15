@@ -22,6 +22,7 @@ import nl.llm.storyteller.core.service.ChatClient;
 import nl.llm.storyteller.core.service.PromptLoader;
 import nl.llm.storyteller.core.service.PromptTemplateService;
 import nl.llm.storyteller.core.service.ResponseGuard;
+import nl.llm.storyteller.core.service.RollingContextWindow;
 import nl.llm.storyteller.core.service.StoryChatPromptBuilder;
 import nl.llm.storyteller.core.service.ValidationPromptBuilder;
 
@@ -133,17 +134,28 @@ public final class StoryTurnService {
     String relevantPastStory = relevantPastStory(sessionId, pastMessageIndexes);
     boolean graphEnabled = settings.graphEnabled(config.graphEnabled());
     ReadOnlyKnowledgeGraphService graph = graphGrounding(settings.knowledgeGraph(), graphEnabled);
-    var recentMessages = repository.loadRecentMessages(sessionId, config.maxRecentTurns() * 2);
-    List<Message> messages = new ArrayList<>(storyPromptBuilder.build(new StoryChatPromptInput(
+    StoryChatPromptInput frame = new StoryChatPromptInput(
       userInput, memory.canonicalState(), memory.summary(), memory.recentSummary(),
-      relevantFacts(graph, userInput), relevantPastStory, recentMessages, ""
-    ), prompts.systemPrompt(), prompts.fixedProtagonists()));
-    if (image != null) {
-      Message userMessage = messages.getLast();
-      messages.set(messages.size() - 1, Message.withImage(
-        userMessage.role(), userMessage.content(), image.dataUrl()
-      ));
-    }
+      relevantFacts(graph, userInput), relevantPastStory, List.of(), ""
+    );
+    RollingContextWindow contextWindow = new RollingContextWindow(contextPolicy(settings));
+    int frameTokens = RollingContextWindow.estimateMessages(withAttachedImage(
+      storyPromptBuilder.build(frame, prompts.systemPrompt(), prompts.fixedProtagonists()), image));
+    List<Message> history = storedHistory(sessionId, contextWindow, frameTokens);
+    RollingContextWindow.Report contextReport = contextWindow.plan(history, frameTokens);
+    // Durable request frontier: the absolute index of the first message sent verbatim. Everything
+    // before it leaves this request, so derived memory must still condense up to it. The slice starts
+    // at persistedCount - history.size(), and the planner's index is slice-relative, so the sum is the
+    // absolute boundary. It is measured before the append and on the real frame (facts and image are
+    // already inside frameTokens). Turns mode keeps it at zero so its memory layout is unchanged.
+    int persistedMessageCount = persistedMessageCount(sessionId);
+    int contextTarget = contextWindow.enabled()
+      ? Math.clamp(persistedMessageCount - history.size() + contextReport.firstVerbatimIndex(),
+      0, persistedMessageCount)
+      : 0;
+    List<Message> messages = withAttachedImage(storyPromptBuilder.build(
+      frame.withRecentMessages(contextWindow.verbatimMessages(history, contextReport)),
+      prompts.systemPrompt(), prompts.fixedProtagonists()), image);
     java.util.Map<String, Object> options = config.chatOptions();
     Double sessionTemperature = settings.temperature();
     Integer sessionMaxTokens = settings.maxTokens();
@@ -170,11 +182,98 @@ public final class StoryTurnService {
       ? chatClient.chat(messages, options, config.requestTimeoutSeconds())
       : chatClient.stream(messages, options, config.requestTimeoutSeconds(), onText);
     String response = validate(userInput, draftResponse, prompts, validation, graph);
-    StoryTurnRecord stored = repository.appendTurn(sessionId, userInput, response, image, clock.instant());
+    StoryTurnRecord stored = repository.appendTurn(sessionId, userInput, response, image, clock.instant(),
+      contextTarget);
     derivedStateService.requestUpdate(sessionId, graphEnabled);
-    return new StoryTurnResult(stored.userMessageIndex(), stored.assistantMessageIndex(), response);
+    return new StoryTurnResult(stored.userMessageIndex(), stored.assistantMessageIndex(), response,
+      contextReport.warning());
   }
 
+  /**
+   * The prompt this turn sends, with its picture attached to the user message. Both the measurement and
+   * the request go through here, so a budget can never be computed against a frame that lacks the image
+   * the model will actually receive.
+   */
+  private static List<Message> withAttachedImage(List<Message> messages, StoryImage image) {
+    if (image == null) {
+      return messages;
+    }
+    List<Message> withImage = new ArrayList<>(messages);
+    Message userMessage = withImage.getLast();
+    withImage.set(withImage.size() - 1,
+      Message.withImage(userMessage.role(), userMessage.content(), image.dataUrl()));
+    return withImage;
+  }
+
+  /**
+   * The context this session's next turn would assemble, measured without a new user prompt and without
+   * knowledge-graph facts, which only a concrete prompt can select. Callers use it to show how much of
+   * the story still goes out verbatim and whether the configured window is too small for this session.
+   */
+  public RollingContextWindow.Report contextReport(String sessionId) {
+    SessionSettings settings = settingsRepository.load(sessionId);
+    SessionMemory memory = memoryRepository.load(sessionId);
+    RollingContextWindow contextWindow = new RollingContextWindow(contextPolicy(settings));
+    int frameTokens = contextWindow.enabled()
+      ? RollingContextWindow.estimateMessages(storyPromptBuilder.build(
+        new StoryChatPromptInput("", memory.canonicalState(), memory.summary(), memory.recentSummary(),
+          "", "", List.of(), ""),
+        settings.prompts().systemPrompt(), settings.prompts().fixedProtagonists()))
+      : 0;
+    return contextWindow.plan(storedHistory(sessionId, contextWindow, frameTokens), frameTokens,
+      persistedMessageCount(sessionId));
+  }
+
+  /**
+   * How many messages this session has persisted. The report describes the whole story, while rolling
+   * mode deliberately reads only the newest slice of it, so this counts from the index rather than from
+   * the messages in hand. Indexes start at zero and stay contiguous, so the newest index is one less
+   * than the count.
+   */
+  private int persistedMessageCount(String sessionId) {
+    return Math.max(0, repository.lastMessageIndex(sessionId) + 1);
+  }
+
+  /**
+   * The warning this session's next context would raise, or empty when nothing needs attention. Turns
+   * mode never warns, so a page render only pays for a full measurement once rolling mode is chosen.
+   */
+  public String contextWarning(String sessionId) {
+    SessionSettings settings = settingsRepository.load(sessionId);
+    if (!new RollingContextWindow(contextPolicy(settings)).policy().rolling()) {
+      return "";
+    }
+    return contextReport(sessionId).warning();
+  }
+
+  /** Context policy for a session: server settings with this session's own overrides applied. */
+  private RollingContextWindow.Policy contextPolicy(SessionSettings settings) {
+    return RollingContextWindow.Policy.from(config)
+      .withSession(settings.contextMode(), settings.contextWindow(), settings.maxTokens());
+  }
+
+  /**
+   * The persisted history the context planner may choose from. Turns mode reads the configured turn count
+   * as it always did. Rolling mode never needs more than the window could hold, so it reads exactly that
+   * many newest messages and leaves the rest of the story in the database.
+   */
+  private List<Message> storedHistory(String sessionId, RollingContextWindow contextWindow, int frameTokens) {
+    if (!contextWindow.enabled()) {
+      return repository.loadRecentMessages(sessionId, config.maxRecentTurns() * 2);
+    }
+    int maximumMessages = RollingContextWindow.maximumMessagesWithinBudget(
+      contextWindow.policy().historyBudgetTokens(frameTokens));
+    return maximumMessages == 0
+      ? List.of()
+      : repository.loadRecentMessages(sessionId, maximumMessages);
+  }
+
+  /**
+   * First message index that counts as earlier story rather than recent context. This stays tied to
+   * chat.maxRecentTurns in both modes: the exchange picker must not depend on the frame a specific
+   * prompt assembles, and offering a slightly older exchange as referencable is harmless because the
+   * excerpt is labelled as a past event.
+   */
   public int referenceBeforeMessageIndex(String sessionId) {
     int lastMessageIndex = repository.lastMessageIndex(sessionId);
     return Math.max(0, lastMessageIndex + 1 - config.maxRecentTurns() * 2);

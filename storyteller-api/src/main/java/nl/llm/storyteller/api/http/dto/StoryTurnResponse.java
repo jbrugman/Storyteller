@@ -4,6 +4,7 @@ public record StoryTurnResponse(
   String sessionId,
   int userMessageIndex,
   int assistantMessageIndex,
-  String response
+  String response,
+  String contextWarning
 ) {
 }

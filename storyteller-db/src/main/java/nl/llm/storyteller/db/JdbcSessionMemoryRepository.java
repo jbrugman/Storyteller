@@ -22,7 +22,7 @@ public final class JdbcSessionMemoryRepository implements SessionMemoryRepositor
       MemoryContent content = loadContent(connection, sessionId);
       return new SessionMemory(
         content.summary(), content.recentSummary(), content.canonicalState(), content.summaryCursor(),
-        content.recentSummaryCursor(), content.canonicalStateCursor(), List.of()
+        content.recentSummaryCursor(), content.canonicalStateCursor(), content.contextTargetIndex(), List.of()
       );
     } catch (SQLException ex) {
       throw new DatabaseException("Could not load memory for session " + sessionId + ".", ex);
@@ -35,7 +35,8 @@ public final class JdbcSessionMemoryRepository implements SessionMemoryRepositor
       MemoryContent content = loadContent(connection, sessionId);
       return new SessionMemory(
         content.summary(), content.recentSummary(), content.canonicalState(), content.summaryCursor(),
-        content.recentSummaryCursor(), content.canonicalStateCursor(), loadMessages(connection, sessionId)
+        content.recentSummaryCursor(), content.canonicalStateCursor(), content.contextTargetIndex(),
+        loadMessages(connection, sessionId)
       );
     } catch (SQLException ex) {
       throw new DatabaseException("Could not load memory update data for session " + sessionId + ".", ex);
@@ -101,7 +102,8 @@ public final class JdbcSessionMemoryRepository implements SessionMemoryRepositor
           database.encryption().decrypt(sessionId, "session_memory.canonical_state_content", resultSet.getString("canonical_state_content")),
           resultSet.getInt("summary_cursor"),
           resultSet.getInt("recent_summary_cursor"),
-          resultSet.getInt("canonical_state_cursor")
+          resultSet.getInt("canonical_state_cursor"),
+          resultSet.getInt("context_target_index")
         );
       }
     }
@@ -175,7 +177,8 @@ public final class JdbcSessionMemoryRepository implements SessionMemoryRepositor
     String canonicalState,
     int summaryCursor,
     int recentSummaryCursor,
-    int canonicalStateCursor
+    int canonicalStateCursor,
+    int contextTargetIndex
   ) {
   }
 }

@@ -1,6 +1,7 @@
 package nl.llm.storyteller.api.story;
 
 import nl.llm.storyteller.core.config.AppConfig;
+import nl.llm.storyteller.core.config.AppConfigLoader;
 import nl.llm.storyteller.core.model.Message;
 import nl.llm.storyteller.core.service.ChatClient;
 import nl.llm.storyteller.db.SessionMemory;
@@ -158,6 +159,137 @@ class SessionMemoryServiceTest {
     assertEquals(0, stored.canonicalStateCursor());
   }
 
+  @Test
+  @DisplayName("""
+    Given a rolling session whose turns recorded a request frontier below the newest turns,
+    When the session memory refreshes twice,
+    Then the mid-term layer should condense toward the frontier rather than the story size, long-term
+        memory should follow one pass behind it, and the frontier should survive every memory write
+    """)
+  void shouldCondenseMidTermTowardTheFrontierAndChainLongTermBehindIt() throws Exception {
+    List<Message> messages = new ArrayList<>();
+    for (int turn = 1; turn <= 20; turn++) {
+      messages.add(new Message("user", "Prompt " + turn));
+      messages.add(new Message("assistant", "Response " + turn));
+    }
+    // Frontier at the boundary after turn 9 (message index 18); the newest turns stay verbatim.
+    // The turns-mode rule would have condensed toward size - 2*chat.maxRecentTurns = 36 instead.
+    SessionMemory initialMemory = new SessionMemory("", "", "", 0, 0, 0, 18, messages);
+    MemoryRepository memoryRepository = new MemoryRepository(initialMemory);
+    SettingsRepository settingsRepository = new SettingsRepository("rolling", 8192);
+    SequencedChatClient client = new SequencedChatClient(List.of("Mid-term history", "Canonical", "Long history"));
+
+    try (SessionMemoryService service = new SessionMemoryService(
+      memoryRepository, settingsRepository, AppConfig.load(), client
+    )) {
+      service.refresh("session-id");
+
+      SessionMemory afterFirst = memoryRepository.load("session-id");
+      assertEquals(18, afterFirst.recentSummaryCursor());
+      assertEquals(0, afterFirst.summaryCursor());
+      assertEquals(40, afterFirst.canonicalStateCursor());
+      assertEquals("Mid-term history", afterFirst.recentSummary());
+      assertEquals(18, afterFirst.contextTargetIndex());
+
+      service.refresh("session-id");
+    }
+
+    SessionMemory stored = memoryRepository.load("session-id");
+    assertEquals(18, stored.summaryCursor());
+    assertEquals(18, stored.recentSummaryCursor());
+    assertEquals(40, stored.canonicalStateCursor());
+    assertEquals("Long history", stored.summary());
+    assertEquals(18, stored.contextTargetIndex());
+    assertEquals(3, client.requests.size());
+  }
+
+  @Test
+  @DisplayName("""
+    Given a rolling session whose recorded frontier is an odd index inside the stored story,
+    When the session memory refreshes,
+    Then the mid-term boundary should round down to a whole turn while the stored frontier is kept intact
+    """)
+  void shouldRoundTheRollingFrontierDownToAWholeTurn() throws Exception {
+    List<Message> messages = new ArrayList<>();
+    for (int turn = 1; turn <= 19; turn++) {
+      messages.add(new Message("user", "Prompt " + turn));
+      messages.add(new Message("assistant", "Response " + turn));
+    }
+    // Frontier 37 sits inside the 38 stored messages on an odd index: the cutoff rounds down to 36 so
+    // a turn is never split, while the durable frontier itself is never rewritten by a memory pass.
+    SessionMemory initialMemory = new SessionMemory("", "", "", 0, 0, 0, 37, messages);
+    MemoryRepository memoryRepository = new MemoryRepository(initialMemory);
+    SettingsRepository settingsRepository = new SettingsRepository("rolling", 8192);
+    SequencedChatClient client = new SequencedChatClient(List.of("Mid-term history", "Canonical"));
+
+    try (SessionMemoryService service = new SessionMemoryService(
+      memoryRepository, settingsRepository, AppConfig.load(), client
+    )) {
+      service.refresh("session-id");
+    }
+
+    SessionMemory stored = memoryRepository.load("session-id");
+    assertEquals(36, stored.recentSummaryCursor());
+    assertEquals(0, stored.summaryCursor());
+    assertEquals(38, stored.canonicalStateCursor());
+    assertEquals(37, stored.contextTargetIndex());
+  }
+
+  @Test
+  @DisplayName("""
+    Given a rolling session whose mid-term window equals the verbatim turn count,
+    When the session memory refreshes twice,
+    Then both layers should still run, the mid-term layer toward the frontier and long-term memory one
+        pass behind it, instead of the equal turn counts silencing the mid-term layer
+    """)
+  void shouldKeepBothMemoryLayersChainedInRollingModeWithEqualTurnLimits() throws Exception {
+    List<Message> messages = new ArrayList<>();
+    for (int turn = 1; turn <= 20; turn++) {
+      messages.add(new Message("user", "Prompt " + turn));
+      messages.add(new Message("assistant", "Response " + turn));
+    }
+    java.nio.file.Path baseDirectory = java.nio.file.Files.createTempDirectory("storyteller-session-memory-equal-limits");
+    java.nio.file.Path configFile = baseDirectory.resolve("systemprompts/application.config");
+    java.nio.file.Files.createDirectories(configFile.getParent());
+    java.nio.file.Files.writeString(configFile, """
+      chat.contextMode=rolling
+      chat.contextWindow=8192
+      chat.maxRecentTurns=2
+      recentSummary.maxRecentTurns=2
+      recentSummary.batchMessages=4
+      summary.batchMessages=4
+      """);
+    // Frontier after turn 9 (index 18): the newest turns stay verbatim. With equal turn limits the
+    // turns-mode rule would have put the mid-term boundary at size - 2 * chat.maxRecentTurns = 36.
+    SessionMemory initialMemory = new SessionMemory("", "", "", 0, 0, 0, 18, messages);
+    MemoryRepository memoryRepository = new MemoryRepository(initialMemory);
+    SettingsRepository settingsRepository = new SettingsRepository("rolling", 8192);
+    SequencedChatClient client = new SequencedChatClient(
+      List.of("Mid-term history", "Canonical", "Long history", "Canonical again"));
+
+    try (SessionMemoryService service = new SessionMemoryService(
+      memoryRepository, settingsRepository, AppConfigLoader.load(baseDirectory, null), client
+    )) {
+      service.refresh("session-id");
+
+      SessionMemory afterFirst = memoryRepository.load("session-id");
+      assertEquals(18, afterFirst.recentSummaryCursor(),
+        "a rolling session always has a mid-term layer, so equal turn counts must not silence it");
+      assertEquals(0, afterFirst.summaryCursor(),
+        "long-term memory condenses what mid-term already consumed, one pass behind it");
+      assertEquals("Mid-term history", afterFirst.recentSummary());
+
+      service.refresh("session-id");
+    }
+
+    SessionMemory stored = memoryRepository.load("session-id");
+    assertEquals(18, stored.summaryCursor(), "the second pass condenses the story mid-term already consumed");
+    assertEquals(18, stored.recentSummaryCursor());
+    assertEquals(40, stored.canonicalStateCursor());
+    assertEquals("Long history", stored.summary());
+    assertEquals(18, stored.contextTargetIndex(), "a memory pass never moves the durable frontier");
+  }
+
   private static final class MemoryRepository implements SessionMemoryRepository {
     private SessionMemory memory;
 
@@ -169,7 +301,7 @@ class SessionMemoryServiceTest {
     public SessionMemory load(String sessionId) {
       return new SessionMemory(
         memory.summary(), memory.recentSummary(), memory.canonicalState(), memory.summaryCursor(),
-        memory.recentSummaryCursor(), memory.canonicalStateCursor(), List.of()
+        memory.recentSummaryCursor(), memory.canonicalStateCursor(), memory.contextTargetIndex(), List.of()
       );
     }
 
@@ -182,7 +314,7 @@ class SessionMemoryServiceTest {
     public boolean updateSummary(String sessionId, SessionMemory expected, String content, int cursor) {
       memory = new SessionMemory(
         content, memory.recentSummary(), memory.canonicalState(), cursor,
-        memory.recentSummaryCursor(), memory.canonicalStateCursor(), memory.messages()
+        memory.recentSummaryCursor(), memory.canonicalStateCursor(), memory.contextTargetIndex(), memory.messages()
       );
       return true;
     }
@@ -191,7 +323,7 @@ class SessionMemoryServiceTest {
     public boolean updateRecentSummary(String sessionId, SessionMemory expected, String content, int cursor) {
       memory = new SessionMemory(
         memory.summary(), content, memory.canonicalState(), memory.summaryCursor(),
-        cursor, memory.canonicalStateCursor(), memory.messages()
+        cursor, memory.canonicalStateCursor(), memory.contextTargetIndex(), memory.messages()
       );
       return true;
     }
@@ -200,7 +332,7 @@ class SessionMemoryServiceTest {
     public boolean updateCanonicalState(String sessionId, SessionMemory expected, String content, int cursor) {
       memory = new SessionMemory(
         memory.summary(), memory.recentSummary(), content, memory.summaryCursor(),
-        memory.recentSummaryCursor(), cursor, memory.messages()
+        memory.recentSummaryCursor(), cursor, memory.contextTargetIndex(), memory.messages()
       );
       return true;
     }
@@ -209,7 +341,7 @@ class SessionMemoryServiceTest {
     public boolean resetMidTermMemory(String sessionId) {
       memory = new SessionMemory(
         memory.summary(), "", memory.canonicalState(), memory.summaryCursor(),
-        0, memory.canonicalStateCursor(), memory.messages()
+        0, memory.canonicalStateCursor(), memory.contextTargetIndex(), memory.messages()
       );
       return true;
     }
@@ -218,7 +350,7 @@ class SessionMemoryServiceTest {
     public boolean resetLongTermMemory(String sessionId) {
       memory = new SessionMemory(
         "", memory.recentSummary(), memory.canonicalState(), 0,
-        memory.recentSummaryCursor(), memory.canonicalStateCursor(), memory.messages()
+        memory.recentSummaryCursor(), memory.canonicalStateCursor(), memory.contextTargetIndex(), memory.messages()
       );
       return true;
     }
@@ -227,18 +359,32 @@ class SessionMemoryServiceTest {
     public boolean resetCanonicalState(String sessionId) {
       memory = new SessionMemory(
         memory.summary(), memory.recentSummary(), "", memory.summaryCursor(),
-        memory.recentSummaryCursor(), 0, memory.messages()
+        memory.recentSummaryCursor(), 0, memory.contextTargetIndex(), memory.messages()
       );
       return true;
     }
   }
 
   private static final class SettingsRepository implements SessionSettingsRepository {
+    private final String contextMode;
+    private final Integer contextWindow;
+
+    private SettingsRepository() {
+      this(null, null);
+    }
+
+    private SettingsRepository(String contextMode, Integer contextWindow) {
+      this.contextMode = contextMode;
+      this.contextWindow = contextWindow;
+    }
+
     @Override
     public SessionSettings load(String sessionId) {
       return new SessionSettings(
         new SessionPrompts("System", "Edited fixed", "Rules"),
-        KnowledgeGraphDocument.empty()
+        KnowledgeGraphDocument.empty(),
+        null, null, null, null, null,
+        contextMode, contextWindow
       );
     }
 

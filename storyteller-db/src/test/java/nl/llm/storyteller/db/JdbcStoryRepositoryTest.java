@@ -214,4 +214,60 @@ class JdbcStoryRepositoryTest {
     assertEquals("Prompt zero", exchanges.getFirst().prompt());
     assertEquals("Response two", exchanges.getLast().response());
   }
+
+  @Test
+  @DisplayName("""
+    Given rolling turns that record the frontier of the request they sent,
+    When those turns append, undo back past that frontier, and append again,
+    Then the frontier should be raised on the append transaction and clamped back inside the undo
+    """)
+  void shouldRaiseTheFrontierOnAppendAndClampItOnUndo() {
+    Database database = new Database("jdbc:h2:file:" + temporaryDirectory.resolve("undo-frontier"), "sa", "");
+    new SchemaInitializer(database).initialize();
+    JdbcSessionRepository sessionRepository = new JdbcSessionRepository(database);
+    JdbcStoryRepository storyRepository = new JdbcStoryRepository(database);
+    JdbcSessionMemoryRepository memoryRepository = new JdbcSessionMemoryRepository(database);
+    Instant now = Instant.parse("2026-11-11T08:00:00Z");
+    String sessionId = "undo-frontier-session";
+    sessionRepository.create(new SessionRecord(
+      sessionId, "Undo frontier", now, now, now, now.plusSeconds(3600), false
+    ), SessionPrompts.empty());
+
+    storyRepository.appendTurn(sessionId, "First prompt", "First response", null, now, 0);
+    assertEquals(0, memoryRepository.loadForUpdate(sessionId).contextTargetIndex(),
+      "A turn that sent its whole context leaves no frontier behind");
+
+    storyRepository.appendTurn(sessionId, "Second prompt", "Second response", null, now, 2);
+    assertEquals(2, memoryRepository.loadForUpdate(sessionId).contextTargetIndex());
+
+    storyRepository.appendTurn(sessionId, "Third prompt", "Third response", null, now, 4);
+    assertEquals(4, memoryRepository.loadForUpdate(sessionId).contextTargetIndex(),
+      "A frontier that only moves forward raises the stored value in the append transaction");
+
+    storyRepository.appendTurn(sessionId, "Fourth prompt", "Fourth response", null, now, 2);
+    assertEquals(4, memoryRepository.loadForUpdate(sessionId).contextTargetIndex(),
+      "A wider window never pulls the frontier back on a turn; only an undo does");
+
+    assertTrue(storyRepository.undoLastTurn(sessionId, now.plusSeconds(1)));
+    assertEquals(4, memoryRepository.loadForUpdate(sessionId).contextTargetIndex(),
+      "The frontier never passed the story that survives this undo, so it stays");
+
+    assertTrue(storyRepository.undoLastTurn(sessionId, now.plusSeconds(2)));
+    assertEquals(4, memoryRepository.loadForUpdate(sessionId).contextTargetIndex(),
+      "A frontier that stops where the surviving story ends still claims nothing that was removed");
+
+    assertTrue(storyRepository.undoLastTurn(sessionId, now.plusSeconds(3)));
+    SessionMemory undone = memoryRepository.loadForUpdate(sessionId);
+    assertEquals(2, undone.messages().size());
+    assertEquals(2, undone.contextTargetIndex(),
+      "The undo clamps the frontier to the messages that remain, so it cannot claim a removed turn");
+
+    storyRepository.appendTurn(sessionId, "Replacement prompt", "Replacement response", null, now.plusSeconds(4), 0);
+    assertEquals(2, memoryRepository.loadForUpdate(sessionId).contextTargetIndex(),
+      "A replacement turn that sent its whole context leaves the clamped frontier alone");
+
+    storyRepository.appendTurn(sessionId, "Narrow prompt", "Narrow response", null, now.plusSeconds(5), 4);
+    assertEquals(4, memoryRepository.loadForUpdate(sessionId).contextTargetIndex(),
+      "The clamp is not sticky: a later rolling turn raises the frontier again");
+  }
 }

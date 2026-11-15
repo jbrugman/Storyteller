@@ -5,6 +5,8 @@ import nl.llm.storyteller.core.JsonSupport;
 import nl.llm.storyteller.core.config.AppConfigLoader;
 import nl.llm.storyteller.core.model.Message;
 import nl.llm.storyteller.core.service.ChatClient;
+import nl.llm.storyteller.db.Database;
+import nl.llm.storyteller.db.JdbcSessionMemoryRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -19,6 +21,13 @@ import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.io.IOException;
+import java.net.ServerSocket;
+import java.security.SecureRandom;
+import java.security.cert.X509Certificate;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -74,6 +83,70 @@ class ApiServerTest {
     if (server != null) {
       server.close();
     }
+  }
+
+  @Test
+  @DisplayName("""
+    Given the API served over TLS,
+    When a same-origin HTTP/2 request carries an Origin header (HTTP/2 sends no Host header),
+    Then it is allowed while a foreign origin is still rejected
+    """)
+  void allowsSameOriginRequestsOverHttp2() throws Exception {
+    int insecurePort = freePort();
+    int securePort = freePort();
+    server = ApiServer.create(new ApiConfig(
+      "127.0.0.1", insecurePort,
+      temporaryDirectory.resolve("database/http2"), "sa", "",
+      Duration.ofMinutes(60),
+      new ApiTlsConfig(true, securePort, temporaryDirectory.resolve("tls-http2"), List.of("localhost"))
+    ));
+    server.start();
+
+    String origin = "https://127.0.0.1:" + securePort;
+    HttpClient client = HttpClient.newBuilder()
+      .version(HttpClient.Version.HTTP_2)
+      .sslContext(trustingAllCertificates())
+      .connectTimeout(Duration.ofSeconds(10))
+      .build();
+
+    HttpResponse<String> sameOrigin = client.send(
+      HttpRequest.newBuilder(URI.create(origin + "/v1/sessions"))
+        .header("Origin", origin).header("Content-Type", "application/json")
+        .POST(HttpRequest.BodyPublishers.ofString("{}")).build(), HttpResponse.BodyHandlers.ofString());
+    assertEquals(HttpClient.Version.HTTP_2, sameOrigin.version(), "the client must negotiate HTTP/2 to exercise this path");
+    assertEquals(201, sameOrigin.statusCode(), sameOrigin.body());
+
+    HttpResponse<String> foreign = client.send(
+      HttpRequest.newBuilder(URI.create(origin + "/v1/sessions"))
+        .header("Origin", "https://evil.example").header("Content-Type", "application/json")
+        .POST(HttpRequest.BodyPublishers.ofString("{}")).build(), HttpResponse.BodyHandlers.ofString());
+    assertEquals(403, foreign.statusCode());
+  }
+
+  private static int freePort() throws IOException {
+    try (ServerSocket socket = new ServerSocket(0)) {
+      return socket.getLocalPort();
+    }
+  }
+
+  private static SSLContext trustingAllCertificates() throws Exception {
+    TrustManager[] trustAll = {new X509TrustManager() {
+      @Override
+      public void checkClientTrusted(X509Certificate[] chain, String authType) {
+      }
+
+      @Override
+      public void checkServerTrusted(X509Certificate[] chain, String authType) {
+      }
+
+      @Override
+      public X509Certificate[] getAcceptedIssuers() {
+        return new X509Certificate[0];
+      }
+    }};
+    SSLContext context = SSLContext.getInstance("TLS");
+    context.init(null, trustAll, new SecureRandom());
+    return context;
   }
 
   @ParameterizedTest
@@ -469,6 +542,18 @@ class ApiServerTest {
     assertTrue(settings.body().contains("Replace it with a minimal empty graph?"));
     assertTrue(settings.body().contains("Replace it with facts generated from Fixed protagonists?"));
     assertTrue(settings.body().contains("Remove all turn-based facts and entities?"));
+    List<String> graphOrder = List.of("id=\"knowledgeGraph\"", "id=\"graphEnabled\"",
+      "class=\"graph-tools\"", "<legend>Response generation</legend>");
+    List<Integer> graphPositions = graphOrder.stream().map(marker -> settings.body().indexOf(marker)).toList();
+    assertTrue(graphPositions.stream().allMatch(position -> position >= 0),
+      "Every graph group has to render: " + graphPositions);
+    assertEquals(graphPositions.stream().sorted().toList(), graphPositions,
+      "The graph, its toggle and its tools belong together, ahead of the response settings");
+    int tools = settings.body().indexOf("class=\"graph-tools\"");
+    int graphBlockCloses = settings.body().indexOf("</fieldset>", settings.body().indexOf("id=\"graphEnabled\""));
+    assertTrue(tools < graphBlockCloses,
+      "The tools act on the graph, so they belong inside its block: tools at " + tools
+        + ", block closed at " + graphBlockCloses);
     assertFalse(settings.body().contains(">Cancel</a>"));
     assertEquals(303, resetTurnBasedFacts.statusCode());
     assertTrue(resetTurnBasedFacts.headers().firstValue("Location").orElseThrow()
@@ -716,6 +801,103 @@ class ApiServerTest {
     assertTrue(systemMessage.contains("Response zero"));
   }
 
+  @Test
+  @DisplayName("""
+    Given a session in rolling context mode,
+    When repeated turns no longer fit in the configured context window,
+    Then every turn persists the absolute boundary of the history it still sent verbatim
+    """)
+  void shouldPersistAnAbsoluteRollingRequestFrontier() throws Exception {
+    int turns = 8;
+    Path coreOverride = temporaryDirectory.resolve("rolling-frontier.config");
+    Files.writeString(coreOverride, """
+      validation.enabled=false
+      chat.contextMode=rolling
+      chat.contextWindow=4096
+      chat.responseReserveTokens=0
+      """);
+    List<String> responses = new ArrayList<>();
+    for (int turn = 1; turn <= turns; turn++) {
+      responses.add(rollingResponse(turn));
+    }
+    RecordingChatClient storyClient = new RecordingChatClient(responses);
+    server = ApiServer.create(
+      config(), AppConfigLoader.load(temporaryDirectory, coreOverride), storyClient, storyClient
+    );
+    server.start();
+    HttpClient client = HttpClient.newHttpClient();
+    String sessionId = createSession(client);
+
+    int storedFrontier = 0;
+    for (int turn = 0; turn < turns; turn++) {
+      HttpResponse<String> submitted = submitTurn(client, sessionId, "Rolling prompt " + turn);
+      assertEquals(200, submitted.statusCode());
+      // The request is the system frame, the verbatim history and the current prompt.
+      int verbatim = storyClient.requests().get(turn).size() - 2;
+      int expectedFrontier = turn * 2 - verbatim;
+      assertEquals(0, expectedFrontier % 2,
+        "a frontier must sit on a turn boundary, so trimming never separates a reply from its prompt");
+      assertTrue(expectedFrontier >= 0 && expectedFrontier <= turn * 2,
+        "a frontier must stay inside the history this session has: " + expectedFrontier);
+      int persistedFrontier = requestFrontier(sessionId);
+      assertEquals(Math.max(storedFrontier, expectedFrontier), persistedFrontier,
+        "turn " + turn + " must raise the frontier to the first message it still sent verbatim");
+      storedFrontier = persistedFrontier;
+    }
+
+    assertTrue(storedFrontier > 0, "a story larger than the window must record that older turns rolled off");
+    assertTrue(storedFrontier < (turns - 1) * 2,
+      "the newest turn must still go out verbatim instead of only living in derived memory");
+    List<Message> finalRequest = storyClient.requests().getLast();
+    assertEquals("system", finalRequest.getFirst().role());
+    assertEquals("Rolling prompt " + (turns - 1), finalRequest.getLast().content());
+    assertFalse(finalRequest.stream().anyMatch(message -> message.content().contains("Rolling prompt 0")),
+      "the oldest turn must have rolled out of the request once the window filled");
+  }
+
+  @Test
+  @DisplayName("""
+    Given a rolling session that already recorded a request frontier,
+    When the model backend fails a turn,
+    Then the failed turn leaves the frontier where it was
+    """)
+  void shouldLeaveTheRequestFrontierUnchangedWhenGenerationFails() throws Exception {
+    int successfulTurns = 4;
+    Path coreOverride = temporaryDirectory.resolve("rolling-failure.config");
+    Files.writeString(coreOverride, """
+      validation.enabled=false
+      chat.contextMode=rolling
+      chat.contextWindow=4096
+      chat.responseReserveTokens=0
+      """);
+    int[] attempts = {0};
+    ChatClient chatClient = (_, _, _) -> {
+      if (attempts[0]++ < successfulTurns) {
+        return rollingResponse(attempts[0]);
+      }
+      throw new java.io.IOException("OpenAI-compatible backend returned HTTP 503: model unavailable");
+    };
+    server = ApiServer.create(
+      config(), AppConfigLoader.load(temporaryDirectory, coreOverride), chatClient, chatClient
+    );
+    server.start();
+    HttpClient client = HttpClient.newHttpClient();
+    String sessionId = createSession(client);
+    for (int turn = 0; turn < successfulTurns; turn++) {
+      assertEquals(200, submitTurn(client, sessionId, "Rolling prompt " + turn).statusCode());
+    }
+
+    int frontierBeforeFailure = requestFrontier(sessionId);
+    assertTrue(frontierBeforeFailure > 0, "a frontier has to exist before a failure can leave it alone");
+
+    HttpResponse<String> failed = submitTurn(client, sessionId, "Prompt after the failure");
+
+    assertEquals(502, failed.statusCode());
+    assertTrue(failed.body().contains("model_backend_error"));
+    assertEquals(frontierBeforeFailure, requestFrontier(sessionId),
+      "a turn that never reached the model must not move the frontier, because it dropped no history");
+  }
+
   @ParameterizedTest
   @CsvSource({
     "'', , 0.6",
@@ -777,6 +959,177 @@ class ApiServerTest {
     }
   }
 
+  @Test
+  @DisplayName("""
+    Given a session that chose rolling mode with its own size on a server without a known window,
+    When the settings page renders, a sizeless save is rejected, and a later turns save omits the size,
+    Then only the rejected save is marked and the stored size survives every other save
+    """)
+  void shouldRequireAWindowForRollingSettings() throws Exception {
+    Path coreOverride = temporaryDirectory.resolve("rolling-window.config");
+    Files.writeString(coreOverride, "");
+    ChatClient chatClient = (_, _, _) -> "Unused";
+    server = ApiServer.create(config(), AppConfigLoader.load(temporaryDirectory, coreOverride), chatClient, chatClient);
+    server.start();
+    HttpClient client = HttpClient.newHttpClient();
+    HttpResponse<String> created = client.send(
+      HttpRequest.newBuilder(uri("/web/sessions"))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .POST(HttpRequest.BodyPublishers.ofString("title=Rolling window"))
+        .build(),
+      HttpResponse.BodyHandlers.ofString()
+    );
+    assertEquals(303, created.statusCode());
+    String cookie = created.headers().firstValue("Set-Cookie").orElseThrow().split(";", 2)[0];
+    String protagonists = "fixed_protagonists:\n  Valerie:\n    role: Protagonist";
+
+    assertEquals(303, postSettings(client, cookie,
+      settingsForm("System", protagonists, "Rules", EMPTY_GRAPH)
+        + "&contextSettings=true&contextMode=rolling&contextWindow=8192").statusCode());
+
+    String rendered = getSettings(client, cookie);
+    assertEquals(List.of("Turns (default)", "Rolling window"), contextModeOptions(rendered),
+      "A story is always on turns or on rolling, so those two are the only choices the form offers");
+    assertTrue(contextModeSelect(rendered).contains("<option value=\"rolling\" selected>"),
+      "The mode the session chose has to be the one that reads as selected");
+    assertTrue(rendered.contains("32768"), "The form offers a starting size: " + rendered);
+    String sized = contextWindowTag(rendered);
+    assertTrue(sized.contains("value=\"8192\""), "The stored size is shown: " + sized);
+    assertFalse(sized.contains("disabled"),
+      "Rolling plans against the size, so it has to stay editable: " + sized);
+    assertFalse(sized.contains("required"),
+      "A size that is already there cannot be demanded again: " + sized);
+    assertTrue(sized.contains("min=\"0\""), "An already named size stays free to return to unknown: " + sized);
+
+    HttpResponse<String> rejected = postSettings(client, cookie,
+      settingsForm("System", protagonists, "Rules", EMPTY_GRAPH)
+        + "&contextSettings=true&contextMode=rolling&contextWindow=0");
+    assertEquals(200, rejected.statusCode(), "A rejected save redisplays the form instead of redirecting");
+    assertTrue(rejected.body().contains("id=\"context-error\""), "The error belongs to the context fields");
+    assertTrue(rejected.body().contains("Rolling context needs the model"),
+      "The inline error explains what to do: " + rejected.body());
+    assertTrue(rejected.body().contains("32768"), "The inline error offers a starting size");
+    String typed = contextWindowTag(rejected.body());
+    assertTrue(typed.contains("aria-invalid=\"true\""), "The window input is marked: " + typed);
+    assertTrue(typed.contains("value=\"0\""), "What the user typed is not lost by the rejection: " + typed);
+    assertTrue(typed.contains("required"), "The rejected size has to be completed before saving: " + typed);
+    assertTrue(typed.contains("min=\"1\""), "Zero cannot be a size while rolling needs one: " + typed);
+
+    assertTrue(contextWindowTag(getSettings(client, cookie)).contains("value=\"8192\""),
+      "The rejected save leaves the stored size standing");
+
+    assertEquals(303, postSettings(client, cookie,
+      settingsForm("System", protagonists, "Rules", EMPTY_GRAPH)
+        + "&contextSettings=true&contextMode=turns").statusCode(),
+      "A turns form does not submit a size, because the field does not apply to it");
+    String inTurns = contextWindowTag(getSettings(client, cookie));
+    assertTrue(inTurns.contains("disabled"),
+      "Turns mode ignores the size, so the form grays it out instead of inviting an edit: " + inTurns);
+    assertFalse(inTurns.contains("required"), "Turns mode never demands a size: " + inTurns);
+    assertTrue(inTurns.contains("min=\"0\""), "Turns mode keeps zero a valid unknown: " + inTurns);
+    assertTrue(inTurns.contains("value=\"8192\""),
+      "A save that cannot carry a size keeps the stored one: " + inTurns);
+
+    assertEquals(303, postSettings(client, cookie,
+      settingsForm("System", protagonists, "Rules", EMPTY_GRAPH)
+        + "&contextSettings=true&contextMode=turns&contextWindow=0").statusCode(),
+      "An explicit unknown size stays valid in turns mode");
+  }
+
+  @Test
+  @DisplayName("""
+    Given a server that starts sessions on rolling without a known window,
+    When its settings page renders,
+    Then rolling is selected and the size starts on the recommended one instead of complaining
+    """)
+  void shouldStartSizelessRollingOnARecommendedWindow() throws Exception {
+    Path coreOverride = temporaryDirectory.resolve("sizeless-rolling.config");
+    Files.writeString(coreOverride, "chat.contextMode=rolling\n");
+    ChatClient chatClient = (_, _, _) -> "Unused";
+    server = ApiServer.create(config(), AppConfigLoader.load(temporaryDirectory, coreOverride), chatClient, chatClient);
+    server.start();
+    HttpClient client = HttpClient.newHttpClient();
+    HttpResponse<String> created = client.send(
+      HttpRequest.newBuilder(uri("/web/sessions"))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .POST(HttpRequest.BodyPublishers.ofString("title=Sizeless rolling"))
+        .build(),
+      HttpResponse.BodyHandlers.ofString()
+    );
+    assertEquals(303, created.statusCode());
+    String cookie = created.headers().firstValue("Set-Cookie").orElseThrow().split(";", 2)[0];
+
+    String rendered = getSettings(client, cookie);
+    assertTrue(contextModeSelect(rendered).contains("<option value=\"rolling\" selected>"),
+      "The form shows the mode a new session starts on: " + contextModeSelect(rendered));
+    assertFalse(rendered.contains("id=\"context-error\""),
+      "A form that already supplied a size has nothing to complain about");
+    String field = contextWindowTag(rendered);
+    assertTrue(field.contains("value=\"32768\""), "The form starts rolling on a workable size: " + field);
+    assertTrue(field.contains("required"), "The size still has to survive being edited away: " + field);
+    assertTrue(field.contains("min=\"1\""), "Zero is not a size for rolling: " + field);
+    assertFalse(field.contains("disabled"), "The size belongs to the mode in effect: " + field);
+
+    String protagonists = "fixed_protagonists:\n  Valerie:\n    role: Protagonist";
+    assertEquals(303, postSettings(client, cookie,
+      settingsForm("System", protagonists, "Rules", EMPTY_GRAPH)
+        + "&contextSettings=true&contextMode=rolling&contextWindow=32768").statusCode(),
+      "Saving the form as it stands has to work");
+    assertEquals("rolling", selectedContextMode(getSettings(client, cookie)),
+      "The session now stores its own choice");
+  }
+
+  /** Reads the rendered context window input, so its state can be asserted exactly. */
+  private String contextWindowTag(String body) {
+    var input = java.util.regex.Pattern.compile("<input[^>]*id=\"contextWindow\"[^>]*>").matcher(body);
+    assertTrue(input.find(), "The context window input has to render");
+    return input.group();
+  }
+
+  /** Reads the rendered context mode select, so its options can be asserted exactly. */
+  private String contextModeSelect(String body) {
+    var select = java.util.regex.Pattern
+      .compile("<select[^>]*id=\"contextMode\"[^>]*>[\\s\\S]*?</select>").matcher(body);
+    assertTrue(select.find(), "The context mode select has to render");
+    return select.group();
+  }
+
+  /** The labels of the mode options, in the order the form shows them. */
+  private List<String> contextModeOptions(String body) {
+    var options = java.util.regex.Pattern.compile("<option value=\"[^\"]*\"[^>]*>([^<]*)</option>")
+      .matcher(contextModeSelect(body));
+    List<String> labels = new ArrayList<>();
+    while (options.find()) {
+      labels.add(options.group(1));
+    }
+    return labels;
+  }
+
+  /** The mode the rendered form shows as selected. */
+  private String selectedContextMode(String body) {
+    String select = contextModeSelect(body);
+    return select.contains("<option value=\"rolling\" selected>") ? "rolling" : "turns";
+  }
+
+  /** The settings page as this session sees it. */
+  private String getSettings(HttpClient client, String cookie) throws Exception {
+    return client.send(
+      HttpRequest.newBuilder(uri("/story/settings")).header("Cookie", cookie).GET().build(),
+      HttpResponse.BodyHandlers.ofString()
+    ).body();
+  }
+
+  private HttpResponse<String> postSettings(HttpClient client, String cookie, String form) throws Exception {
+    return client.send(
+      HttpRequest.newBuilder(uri("/story/settings"))
+        .header("Cookie", cookie)
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .POST(HttpRequest.BodyPublishers.ofString(form))
+        .build(),
+      HttpResponse.BodyHandlers.ofString()
+    );
+  }
+
   private void assertTemperature(HttpResponse<String> response, double expected) {
     assertEquals(200, response.statusCode());
     var slider = java.util.regex.Pattern.compile("<input[^>]*id=\"temperature\"[^>]*>")
@@ -789,6 +1142,68 @@ class ApiServerTest {
     assertEquals(String.format("%.2f", expected), output.group(1).trim());
   }
 
+
+  @Test
+  @DisplayName("Editing a response through the story form replaces it")
+  void shouldEditResponseThroughTheStoryForm() throws Exception {
+    Path coreOverride = temporaryDirectory.resolve("edit-web-core.config");
+    Files.writeString(coreOverride, "validation.enabled=true\n");
+    RecordingChatClient storyClient = new RecordingChatClient(List.of("A door opens in the old library."));
+    RecordingChatClient validationClient = new RecordingChatClient(List.of("{\"decision\":\"ALLOW\"}"));
+    server = ApiServer.create(
+      config(),
+      AppConfigLoader.load(temporaryDirectory, coreOverride),
+      storyClient,
+      validationClient
+    );
+    server.start();
+    HttpClient client = HttpClient.newHttpClient();
+
+    HttpResponse<String> created = client.send(
+      HttpRequest.newBuilder(uri("/web/sessions"))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .POST(HttpRequest.BodyPublishers.ofString("title=The+Library"))
+        .build(),
+      HttpResponse.BodyHandlers.ofString()
+    );
+    String cookie = created.headers().firstValue("Set-Cookie").orElseThrow();
+    String cookiePair = cookie.substring(0, cookie.indexOf(';'));
+
+    byte[] png = java.util.Base64.getDecoder().decode(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jVj8AAAAASUVORK5CYII=");
+    String boundary = "storyteller-repro-boundary";
+    HttpResponse<String> submitted = client.send(
+      HttpRequest.newBuilder(uri("/story/turns"))
+        .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+        .header("Cookie", cookiePair)
+        .POST(HttpRequest.BodyPublishers.ofByteArray(multipartTurn(boundary, "Open the door", png)))
+        .build(),
+      HttpResponse.BodyHandlers.ofString()
+    );
+
+    HttpResponse<String> edited = client.send(
+      HttpRequest.newBuilder(uri("/story/messages/1/edit"))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .header("Cookie", cookiePair)
+        .POST(HttpRequest.BodyPublishers.ofString("content=" + encode("Edited through the story form")))
+        .build(),
+      HttpResponse.BodyHandlers.ofString()
+    );
+
+    HttpResponse<String> story = client.send(
+      HttpRequest.newBuilder(uri("/story")).header("Cookie", cookiePair).GET().build(),
+      HttpResponse.BodyHandlers.ofString()
+    );
+
+    assertEquals(303, submitted.statusCode(), "the turn should have been accepted");
+    assertEquals(303, edited.statusCode(), "the web edit form should redirect after saving, got status "
+      + edited.statusCode() + " body:\n" + edited.body());
+    assertEquals(200, story.statusCode());
+    assertTrue(story.body().contains("Edited through the story form"),
+      "the /story page should show the edited response");
+    assertFalse(story.body().contains("A door opens in the old library."),
+      "the original response should be gone after editing");
+  }
   private String settingsForm(
     String systemPrompt,
     String fixedProtagonists,
@@ -886,6 +1301,41 @@ class ApiServerTest {
     );
   }
 
+  @Test
+  @DisplayName("""
+    Given a server that has no session yet,
+    When its version is requested and its settings page is rendered,
+    Then both name the build that is answering
+    """)
+  void shouldReportTheRunningVersion() throws Exception {
+    server = ApiServer.create(config());
+    server.start();
+    HttpClient client = HttpClient.newHttpClient();
+
+    HttpResponse<String> version = client.send(
+      HttpRequest.newBuilder(uri("/v1/version")).GET().build(),
+      HttpResponse.BodyHandlers.ofString()
+    );
+
+    assertEquals(200, version.statusCode());
+    assertEquals(ApiVersion.read(), JsonSupport.OBJECT_MAPPER.readTree(version.body()).path("version").asText(),
+      "The endpoint reports the build that is running");
+
+    HttpResponse<String> created = client.send(
+      HttpRequest.newBuilder(uri("/web/sessions"))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .POST(HttpRequest.BodyPublishers.ofString("title=Version+stamp"))
+        .build(),
+      HttpResponse.BodyHandlers.ofString()
+    );
+    assertEquals(303, created.statusCode());
+    String cookie = created.headers().firstValue("Set-Cookie").orElseThrow().split(";", 2)[0];
+
+    String rendered = getSettings(client, cookie);
+    assertTrue(rendered.contains("<p class=\"eyebrow\">Storyteller " + ApiVersion.read() + "</p>"),
+      "The settings page names the build serving it, so a stale artefact cannot hide: " + rendered);
+  }
+
   private ApiConfig config() {
     return new ApiConfig(
       "127.0.0.1",
@@ -901,7 +1351,20 @@ class ApiServerTest {
     return URI.create("http://127.0.0.1:" + server.port() + path);
   }
 
+  /** A reply long enough that the small rolling window used by the frontier tests fills after a couple of turns. */
+  private static String rollingResponse(int turn) {
+    return "Rolling response " + turn + ": " + "x".repeat(4000);
+  }
+
+  /** The durable request frontier of a session, read straight from the database the server writes to. */
+  private int requestFrontier(String sessionId) {
+    return new JdbcSessionMemoryRepository(
+      new Database(config().databaseUrl(), "sa", "")
+    ).load(sessionId).contextTargetIndex();
+  }
+
   private static final class RecordingChatClient implements ChatClient {
+
     private final List<String> responses;
     private final List<List<Message>> requests = new ArrayList<>();
 

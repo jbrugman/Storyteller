@@ -5,6 +5,13 @@ export interface Exchange {
   response?: StoryMessage;
 }
 
+// The message a story turn edits. React pairs the assistant message onto the exchange, so its index is the
+// assistant's own and the edit targets it unchanged; the built-in JTE form has only the user index and adds
+// one. Keeping the value here lets the pairing tests pin the exact index, which is what broke the editor.
+export function editAssistantIndex(exchange: Exchange): number {
+  return exchange.response!.messageIndex;
+}
+
 // Pair by role and adjacent persisted indexes, keeping unmatched messages visible.
 export function pairExchanges(messages: StoryMessage[]): Exchange[] {
   const exchanges: Exchange[] = [];

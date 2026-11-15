@@ -17,3 +17,6 @@ memory/tls/*
 /systemprompts/application.config
 *.mv.db
 *.trace.db
+
+# Local deploy target: the Studio host and path of this machine
+/scripts/deploy-studio.sh

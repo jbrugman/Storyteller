@@ -9,6 +9,7 @@ import java.util.List;
 
 public final class SummaryManager extends DerivedMemoryManager {
   private final SummaryPromptBuilder summaryPromptBuilder;
+  private final RollingContextWindow rollingContextWindow;
 
   public SummaryManager(
     StoryHistory historyStore,
@@ -66,6 +67,7 @@ public final class SummaryManager extends DerivedMemoryManager {
   ) {
     super(historyStore, client, config, promptResourceLoader, promptTemplateService, memory, taskQueue, ownsTaskQueue);
     this.summaryPromptBuilder = summaryPromptBuilder;
+    this.rollingContextWindow = new RollingContextWindow(config);
   }
 
   public String loadSummary() {
@@ -89,8 +91,7 @@ public final class SummaryManager extends DerivedMemoryManager {
   @Override
   protected DerivedMemoryJob prepareJob() {
     HistoryState state = historyStore.load();
-    List<Message> recent = historyStore.recentMessages(config.recentSummaryMaxTurns());
-    int cutoffIndex = state.messages().size() - recent.size();
+    int cutoffIndex = longTermCutoff(state);
     int cursor = safeCursor(state.summaryCursor(), state.messages().size());
 
     if (cutoffIndex <= cursor) {
@@ -103,6 +104,21 @@ public final class SummaryManager extends DerivedMemoryManager {
     }
 
     return new DerivedMemoryJob(cursor, cutoffIndex, loadSummary(), pendingMessages);
+  }
+
+  /**
+   * Long-term memory condenses what the mid-term layer already consumed, which keeps the layers one
+   * chain instead of two independent turn-count windows. Only an active rolling window chains that
+   * way, because that is the only case where the mid-term layer always runs toward a boundary the
+   * request recorded. Turns mode, and a rolling session whose window is unknown so that it still
+   * sends turn counts, condenses everything behind the mid-term window.
+   */
+  private int longTermCutoff(HistoryState state) {
+    if (rollingContextWindow.enabled()
+      && rollingContextWindow.midTermLayerEnabled(config.recentSummaryMaxTurns(), config.maxRecentTurns())) {
+      return safeCursor(state.recentSummaryCursor(), state.messages().size());
+    }
+    return state.messages().size() - historyStore.recentMessages(config.recentSummaryMaxTurns()).size();
   }
 
   @Override

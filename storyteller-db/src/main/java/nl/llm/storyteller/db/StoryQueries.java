@@ -70,7 +70,13 @@ final class StoryQueries {
     UPDATE session_memory
     SET summary_cursor = LEAST(summary_cursor, ?),
         recent_summary_cursor = LEAST(recent_summary_cursor, ?),
-        canonical_state_cursor = LEAST(canonical_state_cursor, ?)
+        canonical_state_cursor = LEAST(canonical_state_cursor, ?),
+        context_target_index = LEAST(context_target_index, ?)
+    WHERE session_id = ?
+    """;
+  static final String RAISE_CONTEXT_TARGET = """
+    UPDATE session_memory
+    SET context_target_index = GREATEST(context_target_index, ?)
     WHERE session_id = ?
     """;
   static final String DELETE_UNDONE_TURN_BASED_FACTS = """

@@ -175,4 +175,90 @@ class JdbcSessionSettingsRepositoryTest {
     org.junit.jupiter.api.Assertions.assertNull(reloaded.load("capped").maxTokens(),
       "An explicit null returns the session to the inherited default");
   }
+
+  @Test
+  @DisplayName("""
+    Given sessions that choose their own context mode and window,
+    When the settings are patched, saved and reloaded,
+    Then the context choice persists and an untouched session keeps inheriting the server default
+    """)
+  void shouldPersistContextChoiceAcrossRepositoryReload() {
+    String url = "jdbc:h2:file:" + temporaryDirectory.resolve("context");
+    Database database = new Database(url, "sa", "");
+    new SchemaInitializer(database).initialize();
+    Instant now = Instant.now();
+    var sessions = new JdbcSessionRepository(database);
+    for (String id : java.util.List.of("rolling", "inherit")) {
+      sessions.create(new SessionRecord(id, "Story", now, now, now, now.plusSeconds(3600), false),
+        new SessionPrompts("System", "Fixed", "Rules"));
+    }
+    var repository = new JdbcSessionSettingsRepository(database);
+    org.junit.jupiter.api.Assertions.assertNull(repository.load("rolling").contextMode(),
+      "A fresh session inherits the server context mode");
+    org.junit.jupiter.api.Assertions.assertNull(repository.load("rolling").contextWindow(),
+      "A fresh session inherits the server context window");
+    repository.patchConfiguration("rolling", ConfigurationPatch.context("rolling", 8192));
+
+    var reloaded = new JdbcSessionSettingsRepository(new Database(url, "sa", ""));
+    reloaded.patchConfiguration("rolling", java.util.Map.of(), true, 0.5);
+    assertEquals("rolling", reloaded.load("rolling").contextMode(),
+      "An unrelated temperature patch keeps the stored context choice");
+    assertEquals(Integer.valueOf(8192), reloaded.load("rolling").contextWindow());
+    org.junit.jupiter.api.Assertions.assertNull(reloaded.load("inherit").contextMode(),
+      "An untouched session still inherits");
+
+    reloaded.save("rolling", new SessionSettings(reloaded.load("rolling").prompts(),
+      KnowledgeGraphDocument.empty(), null, null, null, null, null, "turns", 4096));
+    SessionSettings saved = reloaded.load("rolling");
+    assertEquals("turns", saved.contextMode());
+    assertEquals(Integer.valueOf(4096), saved.contextWindow(), "A full save writes the context choice");
+
+    SessionSettings partial = reloaded.load("rolling");
+    reloaded.patchConfiguration("rolling", ConfigurationPatch.contextWindow(16384));
+    SessionSettings windowOnly = reloaded.load("rolling");
+    assertEquals(partial.contextMode(), windowOnly.contextMode(),
+      "A patch carrying only the window must keep the stored mode");
+    assertEquals(Integer.valueOf(16384), windowOnly.contextWindow(), "The submitted window is stored");
+
+    reloaded.patchConfiguration("rolling", ConfigurationPatch.contextMode("turns"));
+    SessionSettings modeOnly = reloaded.load("rolling");
+    assertEquals("turns", modeOnly.contextMode(), "The submitted mode is stored");
+    assertEquals(Integer.valueOf(16384), modeOnly.contextWindow(),
+      "A patch carrying only the mode must keep the stored window");
+
+    reloaded.patchConfiguration("rolling", ConfigurationPatch.context(null, null));
+    org.junit.jupiter.api.Assertions.assertNull(reloaded.load("rolling").contextMode(),
+      "An explicit null returns the session to the inherited defaults");
+    org.junit.jupiter.api.Assertions.assertNull(reloaded.load("rolling").contextWindow());
+  }
+
+  @Test
+  @DisplayName("""
+    Given a repository implementation without context support,
+    When a caller submits a context patch,
+    Then the unsupported group is rejected instead of being dropped silently
+    """)
+  void shouldRejectContextPatchesOnRepositoriesWithoutSupport() {
+    SessionSettingsRepository withoutSupport = new SessionSettingsRepository() {
+      @Override public SessionSettings load(String sessionId) {
+        throw new UnsupportedOperationException();
+      }
+
+      @Override public void save(String sessionId, SessionSettings settings) {
+        throw new UnsupportedOperationException();
+      }
+
+      @Override public void patchConfiguration(String sessionId, java.util.Map<String, String> prompts,
+        boolean updateTemperature, Double temperature) {
+        throw new UnsupportedOperationException();
+      }
+
+      @Override public void setTemperature(String sessionId, Double temperature) {
+        throw new UnsupportedOperationException();
+      }
+    };
+
+    assertThrows(UnsupportedOperationException.class,
+      () -> withoutSupport.patchConfiguration("session", ConfigurationPatch.context("rolling", 8192)));
+  }
 }

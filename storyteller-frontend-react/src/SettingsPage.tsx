@@ -4,7 +4,7 @@ import type { Theme } from './theme';
 import { graphHasData } from './knowledge-graph';
 import type { GraphAction } from './knowledge-graph';
 
-export type EditableSettings = Pick<SessionConfig, 'systemPrompt' | 'fixedProtagonists' | 'rules' | 'temperature' | 'streamingEnabled' | 'validationEnabled' | 'graphEnabled' | 'maxTokens'>;
+export type EditableSettings = Pick<SessionConfig, 'systemPrompt' | 'fixedProtagonists' | 'rules' | 'temperature' | 'streamingEnabled' | 'validationEnabled' | 'graphEnabled' | 'maxTokens' | 'contextMode' | 'contextWindow'>;
 interface Props {
   config: SessionConfig;
   busy: boolean;
@@ -16,6 +16,10 @@ interface Props {
   onSave: (settings: EditableSettings) => void;
   onBack: () => void;
 }
+
+// Mirrors SessionSettingsService.RECOMMENDED_CONTEXT_WINDOW_TOKENS: the size offered to a session that
+// chooses rolling without knowing its model.
+const RECOMMENDED_CONTEXT_WINDOW_TOKENS = 32_768;
 
 // Mirrors the bundled graph tools, which only warn before replacing data that already exists.
 const graphWarnings: Record<GraphAction, string> = {
@@ -35,16 +39,38 @@ export default function SettingsPage({ config, busy, theme, graphText, onGraphTe
   const [temperature, setTemperature] = useState(config.temperature ?? config.effectiveTemperature ?? 1);
   const [useDefaultTokens, setUseDefaultTokens] = useState(config.maxTokens === null);
   const [maxTokens, setMaxTokens] = useState(config.maxTokens ?? config.effectiveMaxTokens ?? 0);
+  const serverWindow = config.effectiveContextWindow ?? 0;
+  // The form always names a mode: turns or rolling. An unset mode is the one the server started the session on.
+  const [contextMode, setContextMode] = useState(config.contextMode ?? config.effectiveContextMode ?? 'turns');
+  // Rolling without any known size cannot plan, so it starts on the recommended size instead of an empty field.
+  const needsASize = (config.contextMode ?? config.effectiveContextMode ?? 'turns') === 'rolling'
+    && (config.contextWindow ?? serverWindow) <= 0;
+  const [useDefaultWindow, setUseDefaultWindow] = useState(config.contextWindow === null && !needsASize);
+  const [contextWindow, setContextWindow] = useState(
+    config.contextWindow ?? (needsASize ? RECOMMENDED_CONTEXT_WINDOW_TOKENS : serverWindow));
+  const windowInEffect = useDefaultWindow ? serverWindow : contextWindow;
+  const rolling = contextMode === 'rolling';
+  const contextMissing = rolling && windowInEffect <= 0;
+  const chooseContextMode = (mode: string) => {
+    setContextMode(mode);
+    if (mode === 'rolling' && windowInEffect <= 0) {
+      setUseDefaultWindow(false);
+      setContextWindow(RECOMMENDED_CONTEXT_WINDOW_TOKENS);
+    }
+  };
   const currentSettings = (): EditableSettings => ({
     systemPrompt, fixedProtagonists, rules, temperature: useDefault ? null : temperature, streamingEnabled, validationEnabled, graphEnabled,
     maxTokens: useDefaultTokens ? null : maxTokens,
+    contextMode,
+    contextWindow: useDefaultWindow ? null : contextWindow,
   });
+  const contextError = `Rolling context needs the model's context window before it can be saved. Give it the model's size in tokens, or ${RECOMMENDED_CONTEXT_WINDOW_TOKENS} to start with, and a model that reserves room for its reasoning counted in that size too.`;
   const runGraphAction = (action: GraphAction) => {
     if (!graphHasData(graphText) || window.confirm(graphWarnings[action])) onGraphAction(action, currentSettings());
   };
   return <main className="settings-page">
     <header className="story-header">
-      <div><p className="eyebrow">Storyteller</p><h1>Story settings</h1></div>
+      <div><p className="eyebrow">Storyteller{config.appVersion ? ` ${config.appVersion}` : ''}</p><h1>Story settings</h1></div>
       <button className="header-action secondary-action" onClick={onBack} disabled={busy}>Back to story</button>
     </header>
     <section className="panel settings-form theme-settings" aria-label="Appearance">
@@ -74,14 +100,20 @@ export default function SettingsPage({ config, busy, theme, graphText, onGraphTe
       <label htmlFor="rules">Rules</label>
       <textarea id="rules" rows={12} maxLength={1000000} required value={rules}
         onChange={event => setRules(event.target.value)} disabled={busy} />
-      <fieldset disabled={busy}>
-        <legend>Knowledge graph</legend>
-        <label><input type="checkbox" id="graphEnabled" checked={graphEnabled} onChange={event => setGraphEnabled(event.target.checked)} />Use the knowledge graph</label>
-        <p className="setting-hint">When on, facts from the graph below ground story generation and validation, and each turn updates the graph automatically. Manual graph tools below always stay available. When off, the story ignores the graph and stops updating it; stored facts are kept. Defaults to the server's graph.enabled setting and is saved per session in the database.</p>
-      </fieldset>
       <label htmlFor="knowledgeGraph">Knowledge graph (JSON)</label>
       <textarea id="knowledgeGraph" rows={18} maxLength={1000000} required value={graphText}
         onChange={event => onGraphTextChange(event.target.value)} disabled={busy} />
+      <fieldset disabled={busy}>
+        <legend>Knowledge graph</legend>
+        <label><input type="checkbox" id="graphEnabled" checked={graphEnabled} onChange={event => setGraphEnabled(event.target.checked)} />Use the knowledge graph</label>
+        <p className="setting-hint">When on, facts from the graph above ground story generation and validation, and each turn updates the graph automatically. The graph tools below always stay available. When off, the story ignores the graph and stops updating it; stored facts are kept. Defaults to the server's graph.enabled setting and is saved per session in the database.</p>
+        <div className="graph-tools" aria-label="Knowledge graph actions">
+          <span>Graph tools</span>
+          <button type="button" className="compact-button" disabled={busy || contextMissing} onClick={() => runGraphAction('generate')}>Generate empty</button>
+          <button type="button" className="compact-button" disabled={busy || contextMissing} onClick={() => runGraphAction('fill')}>Fill from protagonists</button>
+          <button type="button" className="compact-button danger-button" disabled={busy || contextMissing} onClick={() => runGraphAction('reset')}>Reset turn-based</button>
+        </div>
+      </fieldset>
       <fieldset disabled={busy}>
         <legend>Response generation</legend>
         <label><input type="checkbox" checked={streamingEnabled} onChange={event => {
@@ -111,13 +143,25 @@ export default function SettingsPage({ config, busy, theme, graphText, onGraphTe
         <input type="number" id="maxTokens" min={0} max={1000000} step={1} value={maxTokens}
           disabled={useDefaultTokens} onChange={event => setMaxTokens(Number(event.target.value))} />
       </fieldset>
-      <div className="graph-tools" aria-label="Knowledge graph actions">
-        <span>Graph tools</span>
-        <button type="button" className="compact-button" disabled={busy} onClick={() => runGraphAction('generate')}>Generate empty</button>
-        <button type="button" className="compact-button" disabled={busy} onClick={() => runGraphAction('fill')}>Fill from protagonists</button>
-        <button type="button" className="compact-button danger-button" disabled={busy} onClick={() => runGraphAction('reset')}>Reset turn-based</button>
-      </div>
-      <div className="settings-actions"><button disabled={busy}>Save settings</button></div>
+      <fieldset className="context-fieldset" disabled={busy}>
+        <legend>Context window</legend>
+        <label htmlFor="contextMode">Recent story sent verbatim</label>
+        <select id="contextMode" value={contextMode} onChange={event => chooseContextMode(event.target.value)}>
+          <option value="turns">Turns (default)</option>
+          <option value="rolling">Rolling window</option>
+        </select>
+        <p className="setting-hint">Turns sends the configured number of recent turns. Rolling fills the model's context window with as many recent turns as still fit: the prompts, canonical state, summaries and this turn always go out, and the older story reaches the model through its summaries. A session that chooses rolling has to name its size below. Saved per session in the database.</p>
+        <label htmlFor="contextWindow">Model context window (tokens)</label>
+        <label className="example-default"><input type="checkbox" checked={useDefaultWindow} disabled={!rolling}
+          onChange={event => setUseDefaultWindow(event.target.checked)} />Use server default</label>
+        {contextMissing && <p id="context-error" className="settings-error" role="alert">{contextError}</p>}
+        <input type="number" id="contextWindow" min={contextMissing ? 1 : 0} max={100000000} step={1} value={contextWindow}
+          disabled={!rolling || useDefaultWindow} required={contextMissing} aria-invalid={contextMissing}
+          aria-describedby={contextMissing ? 'context-error' : undefined}
+          onChange={event => setContextWindow(Number(event.target.value))} />
+        <p className="setting-hint">Rolling plans the story against this size, so a session on rolling has to name one; {RECOMMENDED_CONTEXT_WINDOW_TOKENS} is a workable start for a smaller local model, and a model that reserves room for its reasoning counts that room in the size too. Turns mode ignores the size, so this field is only editable for rolling and a stored size is kept for when rolling comes back. An empty field follows the server size. Range: 0 to 100000000. Saved per session in the database.</p>
+      </fieldset>
+      <div className="settings-actions"><button disabled={busy || contextMissing}>Save settings</button></div>
     </form>
   </main>;
 }
