@@ -637,17 +637,7 @@ Not yet.
   the prompts, canonical state, summaries and the current turn always go out, and as many whole recent turns as the
   window leaves room for follow. Older turns roll off and reach the model through their summaries, so a smaller model
   keeps a long story without sending all of it.
-- Context mode and window are configurable per session in the API and in both interfaces, defaulting to the server. An
-  unknown window keeps turns-mode behaviour and says so rather than guessing a model's size. The forms choose between
-  turns and rolling, start rolling on 32768 and gray out the size while turns ignores it; the API rejects a rolling
-  choice that has no size.
-- The built-in interface asks the server about streaming when a turn is submitted and falls back to an ordinary turn,
-  and a failed request reports the server's reason instead of only "Generation could not start."
-- The settings pages group the knowledge graph with the graph tools that act on it.
-- Both settings pages and `GET /v1/version` say which build is answering, so an interface can be matched to the
-  artefact serving it.
-- Same-origin requests are now recognised over HTTP/2 and on any host or port, so generating, streaming and editing
-  work when the API is reached over the network (for example the LAN server on https) and not only from localhost.
+- Some bugfixes in the origin context when running the application on another server.
 
 ### 2.1.8
 - Kept the static wireframe aligned with the built-in interface. Its settings page now shows the Response generation (streaming and validation) 

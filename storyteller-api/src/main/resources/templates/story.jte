@@ -462,6 +462,20 @@
         }
       });
 
+      // Some browsers (notably Firefox) restore form values from the previous document
+      // on reload. The streamed turn that triggered the reload had no response textarea,
+      // so that restore can blank the freshly rendered one. The server-rendered text is
+      // the field's default value, so re-assert it after the browser's own restoration.
+      // A browser that does not restore leaves the values untouched.
+      const reassertResponseText = () => {
+        document.querySelectorAll('textarea[name="content"]').forEach(field => {
+          if (field.value !== field.defaultValue) field.value = field.defaultValue;
+        });
+      };
+      window.addEventListener("pageshow", event => {
+        if (!event.persisted) reassertResponseText();
+      });
+
       document.querySelectorAll(".response-edit").forEach(details => {
         const summary = details.querySelector("summary");
         details.addEventListener("toggle", () => {
